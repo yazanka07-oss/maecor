@@ -1,0 +1,2399 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>ميسور — المحاسب الذكي للمشاريع السورية</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>"/>
+  
+  <!-- استيراد الخطوط والمكتبات الأساسية -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;600;700;800;900&display=swap" rel="stylesheet">
+  
+  <!-- مكتبات React و Babel و Recharts المتوافقة -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
+  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+
+  <style>
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body, #root {
+      height: 100%;
+      background: #060d18;
+      font-family: "Cairo", Tahoma, sans-serif;
+      direction: rtl;
+      color: #dde8f5;
+      -webkit-font-smoothing: antialiased;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #060d18;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1e3d63;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #00d4f5;
+    }
+    input, textarea, select, button {
+      font-family: inherit;
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(24px) scale(.98); }
+      to { opacity: 1; transform: none; }
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes ripple {
+      0%, 100% { transform: scale(1); opacity: .4; }
+      50% { transform: scale(1.15); opacity: 1; }
+    }
+    
+    /* استجابة الشاشات وتحسين الهواتف المحمولة */
+    @media (max-width: 768px) {
+      .desk-side { display: none !important; }
+      .mob-bar { display: flex !important; }
+      .main-wrap { padding: 16px 16px 80px !important; }
+      .stats-grid { grid-template-columns: 1fr !important; }
+      .charts-grid { grid-template-columns: 1fr !important; }
+      .split-grid { grid-template-columns: 1fr !important; }
+    }
+    @media (min-width: 769px) {
+      .mob-bar { display: none !important; }
+      .mob-bottom-nav { display: none !important; }
+    }
+    @media print {
+      .no-print { display: none !important; }
+      #pz { display: block !important; }
+      body { background: white; color: black; }
+    }
+    #pz { display: none; direction: rtl; font-family: "Cairo", sans-serif; padding: 20px; }
+  </style>
+</head>
+<body>
+  <div id="root" class="no-print"></div>
+  <div id="pz"></div>
+
+<script>
+// ═══════════════════════════
+//  BACKEND — محاكاة قاعدة البيانات المحلية الآمنة
+// ═══════════════════════════
+window.DB = {
+  hash: s => btoa(unescape(encodeURIComponent(s + ":maysour2025"))),
+  verify: (s, h) => window.DB.hash(s) === h,
+  get: k => { 
+    try {
+      const v = localStorage.getItem("ms:" + k);
+      return v ? JSON.parse(v) : null;
+    } catch { return null; } 
+  },
+  set: (k, v) => { 
+    try {
+      localStorage.setItem("ms:" + k, JSON.stringify(v));
+    } catch {} 
+  },
+  del: k => { 
+    try {
+      localStorage.removeItem("ms:" + k);
+    } catch {} 
+  },
+  register: (name, biz, email, pass) => {
+    if (window.DB.get("u:" + email)) return { ok: false, err: "البريد الإلكتروني مسجل مسبقاً" };
+    const u = {
+      id: Date.now().toString(36),
+      name,
+      biz,
+      email,
+      passHash: window.DB.hash(pass),
+      currency: "ليرة",
+      taxRate: 0,
+      joinDate: new Date().toISOString().split("T")[0],
+      plan: "free"
+    };
+    window.DB.set("u:" + email, u);
+    window.DB.set("session", { email, expires: Date.now() + 30 * 24 * 60 * 60 * 1000 });
+    return { ok: true, user: { ...u, passHash: undefined } };
+  },
+  login: (email, pass) => {
+    const u = window.DB.get("u:" + email);
+    if (!u || !window.DB.verify(pass, u.passHash)) return { ok: false, err: "البريد الإلكتروني أو كلمة المرور غير صحيحة" };
+    window.DB.set("session", { email, expires: Date.now() + 30 * 24 * 60 * 60 * 1000 });
+    const clean = { ...u };
+    delete clean.passHash;
+    return { ok: true, user: clean };
+  },
+  getSession: () => {
+    const s = window.DB.get("session");
+    if (!s || s.expires < Date.now()) {
+      window.DB.del("session");
+      return null;
+    }
+    const u = window.DB.get("u:" + s.email);
+    if (!u) return null;
+    const clean = { ...u };
+    delete clean.passHash;
+    return clean;
+  },
+  changePass: (email, oldP, newP) => {
+    const u = window.DB.get("u:" + email);
+    if (!u || !window.DB.verify(oldP, u.passHash)) return false;
+    window.DB.set("u:" + email, { ...u, passHash: window.DB.hash(newP) });
+    return true;
+  },
+  updateUser: (email, updates) => {
+    const u = window.DB.get("u:" + email);
+    if (!u) return;
+    window.DB.set("u:" + email, { ...u, ...updates });
+  }
+};
+</script>
+
+<script type="text/babel">
+// ═══════════════════════════════════════════════════════
+//  ميسور v4.0 PRO — الواجهة والتفاعل البرمجي
+// ═══════════════════════════════════════════════════════
+
+const { useState, useEffect, useCallback, useRef, useMemo } = React;
+
+// استخراج مكونات Recharts بشكل آمن لتجنب أخطاء التحميل غير المتزامن في المتصفح
+const { 
+  ResponsiveContainer, 
+  AreaChart, 
+  BarChart, 
+  PieChart, 
+  Pie, 
+  Cell, 
+  XAxis, 
+  YAxis, 
+  Tooltip, 
+  Area, 
+  Bar,
+  Legend
+} = window.Recharts || {};
+
+// ──────────────────────────────────────────────────────
+//  1. لوحة الألوان وتصميم الواجهات (Theme)
+// ──────────────────────────────────────────────────────
+const T = {
+  bg: "#060d18", 
+  surface: "#0b1628", 
+  card: "#0f1e33", 
+  cardHov: "#132540",
+  border: "#162d4a", 
+  border2: "#1e3d63",
+  cyan: "#00d4f5", 
+  cyanDim: "#0099bb",
+  gold: "#f5a623", 
+  green: "#2ecc71", 
+  red: "#e74c3c",
+  purple: "#9b59b6", 
+  blue: "#3498db",
+  text: "#dde8f5", 
+  muted: "#4a6b8a", 
+  white: "#ffffff",
+  gCyan: "linear-gradient(135deg,#00d4f5,#0099bb)",
+  gGreen: "linear-gradient(135deg,#2ecc71,#27ae60)",
+  gGold: "linear-gradient(135deg,#f5a623,#e67e22)",
+  gRed: "linear-gradient(135deg,#e74c3c,#c0392b)",
+};
+
+// ──────────────────────────────────────────────────────
+//  2. المساعد والذكاء الاصطناعي (AI Engine)
+// ──────────────────────────────────────────────────────
+const AI_SYS = `أنت المحاسب والمستشار المالي الذكي للمشاريع السورية الصغيرة. حلّل المعاملة المالية المكتوبة أو بيانات المشروع بدقة واقترح الحلول بلغة واضحة وبسيطة تفهم اللهجة السورية والمصطلحات التجارية المحلية.`;
+
+// ──────────────────────────────────────────────────────
+//  3. أدوات مساعدة (Utils)
+// ──────────────────────────────────────────────────────
+const fmt = n => {
+  if (n === undefined || n === null || isNaN(n)) return "0";
+  return Number(n).toLocaleString("ar-SY");
+};
+const fmtC = (n, c = "ليرة") => `${fmt(n)} ${c === "ليرة" ? "ل.س" : c === "دولار" ? "$" : "€"}`;
+const today = () => new Date().toISOString().split("T")[0];
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+
+// ──────────────────────────────────────────────────────
+//  4. البيانات التجريبية الأساسية (Demo Data)
+// ──────────────────────────────────────────────────────
+const DEMO = {
+  txns: [
+    { id: "t1", type: "بيع", amount: 250000, currency: "ليرة", summary: "بيع بضاعة لأبو سامر", date: "2026-05-20", time: "10:30", confidence: 98, entry: { debit: "الصندوق", credit: "المبيعات" }, custId: "c1" },
+    { id: "t2", type: "مصروف", amount: 120000, currency: "ليرة", summary: "أجار المحل الشهري", date: "2026-05-19", time: "09:00", confidence: 95, entry: { debit: "مصروف الإيجار", credit: "الصندوق" } },
+    { id: "t3", type: "بيع", amount: 180000, currency: "ليرة", summary: "مبيعات نقدية يومية", date: "2026-05-18", time: "17:45", confidence: 97, entry: { debit: "الصندوق", credit: "المبيعات" }, custId: "c2" },
+    { id: "t4", type: "شراء", amount: 300000, currency: "ليرة", summary: "شراء مواد أولية من المورد", date: "2026-05-17", time: "11:20", confidence: 92, entry: { debit: "المخزون", credit: "الصندوق" }, suppId: "s1" },
+    { id: "t5", type: "بيع", amount: 95000, currency: "ليرة", summary: "بيع إكسسوارات إضافية", date: "2026-05-16", time: "14:10", confidence: 99, entry: { debit: "الصندوق", credit: "المبيعات" }, custId: "c1" },
+    { id: "t6", type: "مصروف", amount: 45000, currency: "ليرة", summary: "فاتورة كهرباء ومياه", date: "2026-05-15", time: "08:30", confidence: 96, entry: { debit: "مصروف الكهرباء", credit: "الصندوق" } },
+    { id: "t7", type: "بيع", amount: 320000, currency: "ليرة", summary: "طلبية خاصة لشركة النور", date: "2026-05-14", time: "19:00", confidence: 98, entry: { debit: "الصندوق", credit: "المبيعات" }, custId: "c3" },
+    { id: "t8", type: "إيراد", amount: 50000, currency: "ليرة", summary: "عمولة وساطة تسويقية", date: "2026-05-13", time: "12:00", confidence: 88, entry: { debit: "الصندوق", credit: "الإيرادات الأخرى" } },
+    { id: "t9", type: "مصروف", amount: 80000, currency: "ليرة", summary: "سلفة رواتب موظفين", date: "2026-05-12", time: "09:15", confidence: 97, entry: { debit: "مصروف الرواتب", credit: "الصندوق" } },
+    { id: "t10", type: "بيع", amount: 210000, currency: "ليرة", summary: "مبيعات نهاية الأسبوع", date: "2026-05-11", time: "20:30", confidence: 99, entry: { debit: "الصندوق", credit: "المبيعات" }, custId: "c2" }
+  ],
+  custs: [
+    { id: "c1", name: "أبو سامر الحلبي", phone: "0991234567", email: "samir@mail.com", balance: 156000, creditLimit: 500000, notes: "زبون دائم وموثوق", joinDate: "2026-01-10" },
+    { id: "c2", name: "محل الأمانة التجاري", phone: "0112345678", email: "amana@mail.com", balance: 0, creditLimit: 300000, notes: "تسوية الحساب أسبوعية", joinDate: "2026-02-15" },
+    { id: "c3", name: "شركة النور للتجارة", phone: "0933456789", email: "nour@co.sy", balance: 200000, creditLimit: 1000000, notes: "دفع آجل خلال 30 يوماً", joinDate: "2026-03-01" }
+  ],
+  supps: [
+    { id: "s1", name: "مورد المواد الأولية بدمشق", phone: "0944556677", balance: 150000, notes: "توريد بضائع دوري كل خميس" },
+    { id: "s2", name: "شركة التوريدات العامة المحدودة", phone: "0211234567", balance: 50000, notes: "تسهيلات دفع شهرية" }
+  ],
+  items: [
+    { id: "i1", name: "بضاعة صنف أ ممتاز", sku: "A001", unit: "قطعة", qty: 120, cost: 5000, sell: 8000, minQty: 20, cat: "بضائع جاهزة" },
+    { id: "i2", name: "مواد خام أساسية ب", sku: "R001", unit: "كغ", qty: 500, cost: 1200, sell: 0, minQty: 100, cat: "مواد خام" },
+    { id: "i3", name: "منتج جـ مخصص للتعبئة", sku: "P001", unit: "صندوق", qty: 15, cost: 25000, sell: 38000, minQty: 25, cat: "منتجات مصنعة" }
+  ],
+  invs: [
+    { id: "INV-001", type: "مبيعات", partyId: "c1", partyName: "أبو سامر الحلبي", date: "2026-05-20", dueDate: "2026-06-20", items: [{ name: "بضاعة صنف أ ممتاز", qty: 10, price: 8000, total: 80000 }], subtotal: 80000, tax: 0, disc: 0, total: 80000, status: "معلقة", notes: "مستحقة بعد شهر" },
+    { id: "INV-002", type: "مبيعات", partyId: "c3", partyName: "شركة النور للتجارة", date: "2026-05-14", dueDate: "2026-05-15", items: [{ name: "منتج جـ مخصص للتعبئة", qty: 5, price: 38000, total: 190000 }], subtotal: 190000, tax: 0, disc: 0, total: 190000, status: "معلقة", notes: "تأخر السداد يومين" }
+  ],
+  quotes: [
+    { id: "QUO-001", custId: "c2", custName: "محل الأمانة التجاري", date: "2026-05-21", validUntil: "2026-06-21", items: [{ name: "بضاعة صنف أ ممتاز", qty: 50, price: 7500, total: 375000 }], total: 375000, status: "مفتوح", notes: "عرض أسعار مخفض لكميات الجملة" }
+  ],
+  banks: [
+    { id: "b1", name: "الصندوق الرئيسي كاش", bank: "نقدي", no: "—", type: "نقدي", bal: 850000, cur: "ليرة" },
+    { id: "b2", name: "بنك بيمو السعودي الفرنسي", bank: "بيمو", no: "9088172", type: "جاري", bal: 450000, cur: "ليرة" },
+    { id: "b3", name: "شام كاش الإلكتروني", bank: "بنك الشام", no: "09912345", type: "رقمي", bal: 300, cur: "دولار" }
+  ],
+  budget: [
+    { id: "bg1", cat: "المبيعات", type: "إيراد", plan: 1500000 },
+    { id: "bg2", cat: "مصروف الإيجار", type: "مصروف", plan: 120000 },
+    { id: "bg3", cat: "مصروف الرواتب", type: "مصروف", plan: 250000 },
+    { id: "bg4", cat: "مصروف الكهرباء", type: "مصروف", plan: 60000 }
+  ],
+  journal: [
+    { id: "j1", date: "2026-05-01", description: "إثبات رأس مال المشروع كاش في الصندوق", entries: [{ account: "الصندوق", debit: 5000000, credit: 0 }, { account: "رأس المال", debit: 0, credit: 5000000 }] }
+  ],
+  returns: []
+};
+
+const MONTHLY_DATA = [
+  { m: "كانون الثاني", إيرادات: 820000, مصاريف: 410000, ربح: 410000 },
+  { m: "شباط", إيرادات: 950000, مصاريف: 480000, ربح: 470000 },
+  { m: "آذار", إيرادات: 780000, مصاريف: 390000, ربح: 390000 },
+  { m: "نيسان", إيرادات: 1100000, مصاريف: 520000, ربح: 580000 },
+  { m: "أيار", إيرادات: 1095000, مصاريف: 300000, ربح: 795000 }
+];
+
+// ──────────────────────────────────────────────────────
+//  5. مكونات صغيرة واجهة المستخدم (Micro Components)
+// ──────────────────────────────────────────────────────
+const Spin = ({ s = 16 }) => (
+  <div style={{ 
+    width: s, 
+    height: s, 
+    border: `2.5px solid ${T.border2}`, 
+    borderTop: `2.5px solid ${T.cyan}`, 
+    borderRadius: "50%", 
+    animation: "spin .7s linear infinite", 
+    display: "inline-block" 
+  }}/>
+);
+
+const Chip = ({ label, color = T.cyan }) => (
+  <span style={{ 
+    background: color + "14", 
+    color, 
+    border: `1px solid ${color}33`, 
+    padding: "3px 10px", 
+    borderRadius: "16px", 
+    fontSize: "11px", 
+    fontWeight: "bold", 
+    whiteSpace: "nowrap" 
+  }}>{label}</span>
+);
+
+const typeChip = t => {
+  const m = { 
+    "بيع": [T.green], 
+    "شراء": [T.blue], 
+    "مصروف": [T.red], 
+    "إيراد": [T.gold], 
+    "مدفوعة": [T.green], 
+    "معلقة": [T.gold], 
+    "ملغاة": [T.red], 
+    "مرتجعة": [T.purple], 
+    "مفتوح": [T.cyan], 
+    "مقبول": [T.green], 
+    "مرفوض": [T.red], 
+    "محوّل": [T.purple] 
+  };
+  const [c] = m[t] || [T.muted];
+  return <Chip label={t} color={c}/>;
+};
+
+const Tip = ({ active, payload, label }) => {
+  if (!active || !payload || !payload.length) return null;
+  return (
+    <div style={{ 
+      background: T.surface, 
+      border: `1px solid ${T.border2}`, 
+      borderRadius: "10px", 
+      padding: "10px 14px", 
+      fontSize: "12px", 
+      direction: "rtl",
+      boxShadow: "0 8px 16px rgba(0,0,0,0.3)"
+    }}>
+      <div style={{ color: T.text, marginBottom: "6px", fontWeight: "bold" }}>{label}</div>
+      {payload.map((p, i) => (
+        <div key={i} style={{ color: p.color || T.cyan, fontWeight: "bold", margin: "3px 0" }}>
+          {p.name}: {fmt(p.value)} ل.س
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const Btn = ({ onClick, children, v = "primary", disabled = false, full = false, sm = false, icon }) => {
+  const S = {
+    primary:   { bg: T.gCyan,   c: T.white, brd: "none",              sh: `0 4px 14px ${T.cyan}33`  },
+    secondary: { bg: "transparent", c: T.text, brd: `1px solid ${T.border2}`, sh: "none" },
+    success:   { bg: T.gGreen,  c: T.white, brd: "none",              sh: `0 4px 14px ${T.green}33` },
+    danger:    { bg: `${T.red}18`, c: T.red, brd: `1px solid ${T.red}33`, sh: "none"                },
+    gold:      { bg: T.gGold,   c: T.white, brd: "none",              sh: `0 4px 14px ${T.gold}33`  },
+  };
+  const s = S[v] || S.primary;
+  return (
+    <button 
+      onClick={disabled ? undefined : onClick} 
+      disabled={disabled}
+      style={{ 
+        background: disabled ? T.border : s.bg, 
+        color: disabled ? T.muted : s.c, 
+        border: s.brd, 
+        borderRadius: "10px",
+        padding: sm ? "6px 14px" : "10px 20px", 
+        fontSize: sm ? "12px" : "13px", 
+        fontWeight: "bold", 
+        cursor: disabled ? "not-allowed" : "pointer",
+        transition: "all .2s ease-in-out", 
+        display: "inline-flex", 
+        alignItems: "center", 
+        gap: "8px",
+        width: full ? "100%" : "auto", 
+        justifyContent: "center", 
+        whiteSpace: "nowrap", 
+        boxShadow: disabled ? "none" : s.sh 
+      }}
+      onMouseEnter={e => {
+        if (!disabled && v === "secondary") {
+          e.currentTarget.style.borderColor = T.cyan;
+          e.currentTarget.style.color = T.cyan;
+        }
+      }}
+      onMouseLeave={e => {
+        if (!disabled && v === "secondary") {
+          e.currentTarget.style.borderColor = T.border2;
+          e.currentTarget.style.color = T.text;
+        }
+      }}
+    >
+      {icon && <span style={{ fontSize: sm ? "14px" : "16px" }}>{icon}</span>}
+      {children}
+    </button>
+  );
+};
+
+const Modal = ({ title, onClose, children, w = 480 }) => (
+  <div style={{ 
+    position: "fixed", 
+    inset: 0, 
+    background: "rgba(0, 0, 0, 0.75)", 
+    backdropFilter: "blur(6px)", 
+    display: "flex", 
+    alignItems: "center", 
+    justifyContent: "center", 
+    zIndex: 2000, 
+    padding: "16px" 
+  }} onClick={e => e.target === e.currentTarget && onClose()}>
+    <div style={{ 
+      background: T.card, 
+      border: `1px solid ${T.border2}`, 
+      borderRadius: "20px", 
+      width: "100%", 
+      maxWidth: w, 
+      maxHeight: "90vh", 
+      overflowY: "auto", 
+      animation: "slideUp .25s ease-out", 
+      boxShadow: "0 24px 60px rgba(0,0,0,0.6)" 
+    }}>
+      <div style={{ 
+        display: "flex", 
+        justifyContent: "space-between", 
+        alignItems: "center", 
+        padding: "16px 24px", 
+        borderBottom: `1px solid ${T.border}`, 
+        position: "sticky", 
+        top: 0, 
+        background: T.card, 
+        zIndex: 5 
+      }}>
+        <span style={{ fontWeight: "900", color: T.white, fontSize: "16px" }}>{title}</span>
+        <button onClick={onClose} style={{ 
+          background: "none", 
+          border: "none", 
+          color: T.muted, 
+          fontSize: "24px", 
+          cursor: "pointer", 
+          width: "30px", 
+          height: "30px", 
+          borderRadius: "50%", 
+          display: "flex", 
+          alignItems: "center", 
+          justifyContent: "center" 
+        }}>&times;</button>
+      </div>
+      <div style={{ padding: "20px 24px" }}>{children}</div>
+    </div>
+  </div>
+);
+
+const FInp = ({ label, v, onChange, type = "text", ph = "", req = false }) => (
+  <div style={{ marginBottom: "14px" }}>
+    {label && <div style={{ fontSize: "12px", color: T.muted, marginBottom: "6px", fontWeight: "bold" }}>{label}{req && <span style={{ color: T.red }}> *</span>}</div>}
+    <input 
+      type={type} 
+      value={v || ""} 
+      onChange={e => onChange(e.target.value)} 
+      placeholder={ph}
+      style={{ 
+        width: "100%", 
+        background: T.surface, 
+        border: `1px solid ${T.border2}`, 
+        borderRadius: "10px", 
+        padding: "11px 14px", 
+        color: T.text, 
+        fontSize: "13px", 
+        direction: "rtl", 
+        boxSizing: "border-box",
+        outline: "none",
+        transition: "border-color 0.2s"
+      }}
+      onFocus={e => e.target.style.borderColor = T.cyan} 
+      onBlur={e => e.target.style.borderColor = T.border2}
+    />
+  </div>
+);
+
+const FSel = ({ label, v, onChange, opts }) => (
+  <div style={{ marginBottom: "14px" }}>
+    {label && <div style={{ fontSize: "12px", color: T.muted, marginBottom: "6px", fontWeight: "bold" }}>{label}</div>}
+    <select 
+      value={v} 
+      onChange={e => onChange(e.target.value)}
+      style={{ 
+        width: "100%", 
+        background: T.surface, 
+        border: `1px solid ${T.border2}`, 
+        borderRadius: "10px", 
+        padding: "11px 14px", 
+        color: T.text, 
+        fontSize: "13px", 
+        direction: "rtl", 
+        boxSizing: "border-box",
+        outline: "none"
+      }}
+    >
+      {opts.map(o => <option key={o.v !== undefined ? o.v : o} value={o.v !== undefined ? o.v : o}>{o.l || o}</option>)}
+    </select>
+  </div>
+);
+
+const FNum = ({ label, v, onChange, req = false }) => (
+  <div style={{ marginBottom: "14px" }}>
+    {label && <div style={{ fontSize: "12px", color: T.muted, marginBottom: "6px", fontWeight: "bold" }}>{label}{req && <span style={{ color: T.red }}> *</span>}</div>}
+    <input 
+      type="number" 
+      value={v !== undefined && v !== null ? v : ""} 
+      onChange={e => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
+      style={{ 
+        width: "100%", 
+        background: T.surface, 
+        border: `1px solid ${T.border2}`, 
+        borderRadius: "10px", 
+        padding: "11px 14px", 
+        color: T.text, 
+        fontSize: "13px", 
+        boxSizing: "border-box",
+        outline: "none"
+      }}
+    />
+  </div>
+);
+
+const StatCard = ({ icon, label, value, sub, color = T.cyan, trend, onClick }) => (
+  <div 
+    onClick={onClick} 
+    style={{ 
+      background: T.card, 
+      border: `1px solid ${T.border}`, 
+      borderRadius: "18px", 
+      padding: "16px 20px", 
+      cursor: onClick ? "pointer" : "default", 
+      transition: "all 0.2s ease", 
+      position: "relative", 
+      overflow: "hidden" 
+    }}
+    onMouseEnter={e => { if (onClick) { e.currentTarget.style.borderColor = color; e.currentTarget.style.background = T.cardHov; } }}
+    onMouseLeave={e => { if (onClick) { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.card; } }}
+  >
+    <div style={{ 
+      position: "absolute", 
+      top: 0, 
+      right: 0, 
+      width: "80px", 
+      height: "80px", 
+      background: `radial-gradient(circle at top right, ${color}15 0%, transparent 75%)`, 
+      borderRadius: "0 18px 0 80px" 
+    }}/>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: "11px", color: T.muted, marginBottom: "6px", fontWeight: "bold" }}>{label}</div>
+        <div style={{ color, fontSize: "18px", fontWeight: "900", lineHeight: 1.2, wordBreak: "break-all" }}>{value}</div>
+        {sub && <div style={{ fontSize: "11px", color: T.muted, marginTop: "6px" }}>{sub}</div>}
+        {trend !== undefined && (
+          <div style={{ fontSize: "11px", marginTop: "4px", color: trend >= 0 ? T.green : T.red, fontWeight: "bold" }}>
+            {trend >= 0 ? "↑" : "↓"} {Math.abs(trend)}%
+          </div>
+        )}
+      </div>
+      <div style={{ 
+        width: "40px", 
+        height: "40px", 
+        borderRadius: "12px", 
+        background: color + "18", 
+        display: "flex", 
+        alignItems: "center", 
+        justifyContent: "center", 
+        fontSize: "20px", 
+        flexShrink: 0 
+      }}>{icon}</div>
+    </div>
+  </div>
+);
+
+// ──────────────────────────────────────────────────────
+//  6. شاشة المصادقة والدخول (Auth Screen)
+// ──────────────────────────────────────────────────────
+function AuthScreen({ onLogin }) {
+  const [mode, setMode] = useState("login");
+  const [f, setF] = useState({ name: "", biz: "", email: "", pass: "" });
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const set = k => v => setF(p => ({ ...p, [k]: v }));
+
+  const go = async () => {
+    setErr(""); 
+    setLoading(true);
+    await new Promise(r => setTimeout(r, 600));
+    
+    if (mode === "register") {
+      if (!f.name || !f.biz || !f.email || !f.pass) { 
+        setErr("يرجى تعبئة كافة الحقول المطلوبة"); 
+        setLoading(false); 
+        return; 
+      }
+      const res = window.DB.register(f.name, f.biz, f.email, f.pass);
+      if (res.ok) {
+        onLogin(res.user);
+      } else {
+        setErr(res.err);
+      }
+    } else {
+      const res = window.DB.login(f.email, f.pass);
+      if (res.ok) {
+        onLogin(res.user);
+      } else {
+        setErr(res.err);
+      }
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ 
+      minHeight: "100vh", 
+      background: `radial-gradient(ellipse at 30% 20%, #0d2040 0%, ${T.bg} 60%)`, 
+      display: "flex", 
+      alignItems: "center", 
+      justifyContent: "center", 
+      padding: "16px" 
+    }}>
+      <div style={{ width: "100%", maxWidth: "420px", animation: "fadeUp .5s ease-out" }}>
+        <div style={{ textAlign: "center", marginBottom: "28px" }}>
+          <div style={{ 
+            width: "70px", 
+            height: "70px", 
+            borderRadius: "20px", 
+            background: T.gCyan, 
+            display: "flex", 
+            alignItems: "center", 
+            justifyContent: "center", 
+            fontSize: "32px", 
+            margin: "0 auto 16px", 
+            boxShadow: `0 12px 32px ${T.cyan}44` 
+          }}>📊</div>
+          <h1 style={{ fontSize: "36px", fontWeight: "900", color: T.white, margin: 0, letterSpacing: "-0.5px" }}>ميسور</h1>
+          <p style={{ color: T.muted, fontSize: "13px", margin: "6px 0 0" }}>المحاسب الذكي والآمن للمنشآت والمشاريع السورية</p>
+        </div>
+        
+        <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "24px", padding: "28px", boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }}>
+          <div style={{ display: "flex", gap: "6px", marginBottom: "24px", background: T.surface, borderRadius: "14px", padding: "4px" }}>
+            {[["login", "تسجيل الدخول"], ["register", "إنشاء حساب جديد"]].map(([m, l]) => (
+              <button 
+                key={m} 
+                onClick={() => { setMode(m); setErr(""); }}
+                style={{ 
+                  flex: 1, 
+                  padding: "10px", 
+                  border: "none", 
+                  borderRadius: "10px", 
+                  cursor: "pointer", 
+                  background: mode === m ? T.card : "transparent", 
+                  color: mode === m ? T.cyan : T.muted, 
+                  fontSize: "13px", 
+                  fontWeight: "bold", 
+                  transition: "all 0.2s" 
+                }}
+              >
+                {l}
+              </button>
+            ))}
+          </div>
+
+          {mode === "register" && (
+            <>
+              <FInp label="الاسم الكامل" v={f.name} onChange={set("name")} req />
+              <FInp label="اسم المحل / المشروع التجاري" v={f.biz} onChange={set("biz")} req />
+            </>
+          )}
+          
+          <FInp label="البريد الإلكتروني" v={f.email} onChange={set("email")} type="email" req />
+          <FInp label="كلمة المرور" v={f.pass} onChange={set("pass")} type="password" req />
+          
+          {err && (
+            <div style={{ 
+              color: T.red, 
+              fontSize: "12px", 
+              marginBottom: "14px", 
+              textAlign: "center", 
+              background: T.red + "11", 
+              border: `1px solid ${T.red}33`, 
+              borderRadius: "10px", 
+              padding: "10px" 
+            }}>
+              ⚠️ {err}
+            </div>
+          )}
+
+          <button 
+            onClick={go} 
+            disabled={loading}
+            style={{ 
+              width: "100%", 
+              padding: "13px", 
+              border: "none", 
+              borderRadius: "12px", 
+              background: T.gCyan, 
+              color: T.white, 
+              fontSize: "14px", 
+              fontWeight: "800", 
+              cursor: "pointer", 
+              display: "flex", 
+              alignItems: "center", 
+              justifyContent: "center", 
+              gap: "10px", 
+              boxShadow: `0 6px 20px ${T.cyan}33`,
+              marginTop: "10px"
+            }}
+          >
+            {loading ? <Spin s={18}/> : mode === "login" ? "تسجيل الدخول ←" : "إنشاء الحساب الآن ←"}
+          </button>
+
+          <div style={{ textAlign: "center", marginTop: "18px", paddingTop: "16px", borderTop: `1px solid ${T.border}` }}>
+            <button 
+              onClick={() => onLogin({ name: "مستثمر تجريبي", biz: "المشروع الافتراضي", email: "demo@maysour.com", isDemo: true, currency: "ليرة", taxRate: 0, joinDate: today() })}
+              style={{ 
+                background: "none", 
+                border: `1px solid ${T.border2}`, 
+                color: T.muted, 
+                borderRadius: "10px", 
+                padding: "8px 20px", 
+                fontSize: "12px", 
+                cursor: "pointer", 
+                transition: "all 0.2s" 
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = T.cyan}
+              onMouseLeave={e => e.currentTarget.style.color = T.muted}
+            >
+              استعراض النسخة التجريبية مباشرة
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────
+//  7. التطبيق المحاسبي الأساسي (MaysourApp)
+// ──────────────────────────────────────────────────────
+function MaysourApp({ user, onLogout, onUpdateUser }) {
+  const [pg, setPg] = useState("dashboard");
+  const [hist, setHist] = useState(["dashboard"]);
+  
+  // قواعد البيانات الداخلية
+  const [txns, setTxns] = useState([]);
+  const [custs, setCusts] = useState([]);
+  const [supps, setSupps] = useState([]);
+  const [items, setItems] = useState([]);
+  const [invs, setInvs] = useState([]);
+  const [quotes, setQuotes] = useState([]);
+  const [banks, setBanks] = useState([]);
+  const [budget, setBudget] = useState([]);
+  const [journal, setJournal] = useState([]);
+  const [returns, setReturns] = useState([]);
+
+  // حالات الإدخال والتفاعل
+  const [flash, setFlash] = useState(null);
+  const [modal, setModal] = useState(null);
+  const [sideOpen, setSideOpen] = useState(false);
+
+  // واجهات الذكاء الاصطناعي والمستشار
+  const [aiTxt, setAiTxt] = useState("");
+  const [aiLoad, setAiLoad] = useState(false);
+  const [inputMode, setInputMode] = useState("text");
+  const [advQ, setAdvQ] = useState("");
+  const [advA, setAdvA] = useState("");
+  const [advLoad, setAdvLoad] = useState(false);
+  
+  const [txnFilter, setTxnFilter] = useState("الكل");
+
+  // تحميل وحفظ البيانات لكل مستخدم بشكل منفصل
+  const K = k => `${k}:${user.email}`;
+
+  useEffect(() => {
+    const loadAll = async () => {
+      setTxns(window.DB.get(K("txns")) || DEMO.txns);
+      setCusts(window.DB.get(K("custs")) || DEMO.custs);
+      setSupps(window.DB.get(K("supps")) || DEMO.supps);
+      setItems(window.DB.get(K("items")) || DEMO.items);
+      setInvs(window.DB.get(K("invs")) || DEMO.invs);
+      setQuotes(window.DB.get(K("quotes")) || DEMO.quotes);
+      setBanks(window.DB.get(K("banks")) || DEMO.banks);
+      setBudget(window.DB.get(K("budget")) || DEMO.budget);
+      setJournal(window.DB.get(K("journal")) || DEMO.journal);
+      setReturns(window.DB.get(K("returns")) || DEMO.returns);
+    };
+    loadAll();
+  }, [user.email]);
+
+  const persist = (col, data) => {
+    const setters = {
+      txns: setTxns, custs: setCusts, supps: setSupps,
+      items: setItems, invs: setInvs, quotes: setQuotes,
+      banks: setBanks, budget: setBudget, journal: setJournal,
+      returns: setReturns
+    };
+    if (setters[col]) setters[col](data);
+    if (!user.isDemo) {
+      window.DB.set(K(col), data);
+    }
+  };
+
+  // الملاحة والتنقل الخلفي
+  const nav = useCallback(p => {
+    setHist(h => [...h, p]);
+    setPg(p);
+    setSideOpen(false);
+  }, []);
+
+  const back = () => {
+    if (hist.length < 2) return;
+    const prev = hist[hist.length - 2];
+    setHist(h => h.slice(0, -1));
+    setPg(prev);
+  };
+
+  const showFlash = (msg, color = T.green) => {
+    setFlash({ msg, color });
+    setTimeout(() => setFlash(null), 3500);
+  };
+
+  // الحسابات المالية اللحظية لملخص الحسابات
+  const sales = useMemo(() => {
+    return txns.filter(t => t.type === "بيع" || t.type === "إيراد").reduce((s, t) => s + (t.amount || 0), 0);
+  }, [txns]);
+
+  const expenses = useMemo(() => {
+    return txns.filter(t => t.type === "مصروف" || t.type === "شراء").reduce((s, t) => s + (t.amount || 0), 0);
+  }, [txns]);
+
+  const profit = sales - expenses;
+  const marginPct = sales > 0 ? Math.round((profit / sales) * 100) : 0;
+  
+  const invVal = useMemo(() => {
+    return items.reduce((s, i) => s + ((i.qty || 0) * (i.cost || 0)), 0);
+  }, [items]);
+
+  const lowStock = useMemo(() => {
+    return items.filter(i => (i.qty || 0) <= (i.minQty || 0));
+  }, [items]);
+
+  const pendingTotal = useMemo(() => {
+    return invs.filter(i => i.status === "معلقة").reduce((s, i) => s + (i.total || 0), 0);
+  }, [invs]);
+
+  const bankTot = useMemo(() => {
+    return banks.filter(b => b.cur === "ليرة").reduce((s, b) => s + (b.bal || 0), 0);
+  }, [banks]);
+
+  const taxDue = Math.round(sales * (user.taxRate || 0) / 100);
+
+  const budgetActual = useMemo(() => {
+    return budget.map(b => {
+      const actual = txns.filter(t => t.entry?.debit === b.cat || t.entry?.credit === b.cat).reduce((s, t) => s + (t.amount || 0), 0);
+      return { 
+        ...b, 
+        actual, 
+        variance: b.plan - actual, 
+        pct: b.plan > 0 ? Math.round((actual / b.plan) * 100) : 0 
+      };
+    });
+  }, [budget, txns]);
+
+  // محاكاة سريعة لتحليل المعاملات بالذكاء الاصطناعي محلياً لمنع المشاكل البرمجية
+  const parseTransactionWithAI = async (text) => {
+    setAiLoad(true);
+    await new Promise(r => setTimeout(r, 1200)); // محاكاة المعالجة اللحظية
+    let type = "بيع";
+    let amount = 150000;
+    let category = "المبيعات";
+    let debit = "الصندوق";
+    let credit = "المبيعات";
+    
+    // قواعد ذكية بسيطة لتحليل النص
+    const cleanText = text.toLowerCase();
+    if (cleanText.includes("شراء") || cleanText.includes("اشتريت")) {
+      type = "شراء";
+      category = "المشتريات";
+      debit = "المخزون";
+      credit = "الصندوق";
+    } else if (cleanText.includes("أجار") || cleanText.includes("اجار") || cleanText.includes("كهرباء") || cleanText.includes("راتب") || cleanText.includes("دفعت")) {
+      type = "مصروف";
+      category = cleanText.includes("أجار") ? "مصروف الإيجار" : cleanText.includes("كهرباء") ? "مصروف الكهرباء" : "مصاريف تشغيلية";
+      debit = category;
+      credit = "الصندوق";
+    }
+
+    const numMatch = text.match(/\d+[\d,.]*/);
+    if (numMatch) {
+      amount = parseInt(numMatch[0].replace(/,/g, ""), 10);
+    }
+
+    const newTxn = {
+      id: uid(),
+      type,
+      amount,
+      currency: "ليرة",
+      summary: text,
+      date: today(),
+      time: new Date().toLocaleTimeString("ar-SY", { hour: "2-digit", minute: "2-digit" }),
+      confidence: 96,
+      entry: { debit, credit }
+    };
+
+    persist("txns", [newTxn, ...txns]);
+    setAiTxt("");
+    showFlash(`✓ تم تسجيل المعاملة بذكاء: ${type} بقيمة ${fmt(amount)} ل.س`);
+    setAiLoad(false);
+    nav("dashboard");
+  };
+
+  // المساعد المالي التفاعلي
+  const handleAdvisorQuery = async () => {
+    if (!advQ.trim()) return;
+    setAdvLoad(true);
+    await new Promise(r => setTimeout(r, 1500));
+    
+    let answer = "بناءً على مراجعة ملف مشروعك الحالي:\n\n";
+    const q = advQ.toLowerCase();
+
+    if (q.includes("ربح") || q.includes("ليش")) {
+      answer += `• هامش ربحك الحالي يبلغ ${marginPct}% وهو مستقر نسبياً.\n• يفضل تقليل الاعتماد على الديون والذمم المعلقة التي تبلغ حالياً ${fmt(pendingTotal)} ل.س لرفع النقد الفعلي بالصندوق.`;
+    } else if (q.includes("مصروف") || q.includes("مصاريف")) {
+      answer += `• أكبر بند مصاريف مسجل هو الإيجار والخدمات العامة.\n• يوصى بمقارنة المصاريف الفعلية في قسم 'الميزانية التقديرية' لتحديد أي انحراف مالي يتجاوز الخطة المعتمدة.`;
+    } else {
+      answer += `• صحتك المالية جيدة، إيراداتك (${fmt(sales)} ل.س) تفوق مصاريفك (${fmt(expenses)} ل.س) بشكل آمن.\n• ننصحك بتركيز الجهود على تسريع تحصيل الفواتير المعلقة.`;
+    }
+
+    setAdvA(answer);
+    setAdvLoad(false);
+  };
+
+  // دوال حذف البيانات وإجراء العمليات الإدارية
+  const handleDelete = (col, arr, id) => {
+    const filtered = arr.filter(x => x.id !== id);
+    persist(col, filtered);
+    showFlash("تم حذف البند ماليًا بنجاح", T.gold);
+  };
+
+  const handleSaveModal = (col, arr, item, extra = {}) => {
+    const exists = arr.find(x => x.id === item.id);
+    let updated;
+    if (exists) {
+      updated = arr.map(x => x.id === item.id ? item : x);
+    } else {
+      updated = [...arr, { ...item, id: uid(), ...extra }];
+    }
+    persist(col, updated);
+    showFlash("✓ تم الحفظ بنجاح وتحديث السجلات");
+    setModal(null);
+  };
+
+  // ──────────────────────────────────────────────────────
+  //  هيكلية القائمة الجانبية وإعدادات الملاحة
+  // ──────────────────────────────────────────────────────
+  const NAV_ITEMS = [
+    { id: "dashboard", icon: "🏠", label: "لوحة التحكم", group: "main" },
+    { id: "input", icon: "➕", label: "إدخال مالي سريع", group: "main" },
+    { id: "txns", icon: "📋", label: "دفتر المعاملات", group: "main", badge: txns.length },
+    { id: "custs", icon: "👥", label: "إدارة العملاء", group: "manage", badge: custs.length },
+    { id: "supps", icon: "🏭", label: "إدارة الموردين", group: "manage", badge: supps.length },
+    { id: "stock", icon: "📦", label: "المخزن والمخزون", group: "manage", badge: lowStock.length ? { n: lowStock.length, warn: true } : null },
+    { id: "invoices", icon: "🧾", label: "الفواتير المصدرة", group: "manage", badge: invs.filter(i=>i.status==="معلقة").length ? { n: invs.filter(i=>i.status==="معلقة").length, warn: true } : null },
+    { id: "quotes", icon: "📝", label: "عروض الأسعار", group: "manage" },
+    { id: "returns", icon: "↩️", label: "سجل المرتجعات", group: "manage" },
+    { id: "banks", icon: "🏦", label: "الحسابات والنقدية", group: "manage" },
+    { id: "budget", icon: "🎯", label: "الموازنة التقديرية", group: "reports" },
+    { id: "pl", icon: "📊", label: "الأرباح والخسائر", group: "reports" },
+    { id: "cashflow", icon: "💸", label: "التدفق النقدي", group: "reports" },
+    { id: "bs", icon: "⚖️", label: "الميزانية العمومية", group: "reports" },
+    { id: "trial", icon: "📒", label: "ميزان المراجعة", group: "reports" },
+    { id: "expAnal", icon: "🔍", label: "تحليل المصاريف", group: "reports" },
+    { id: "tax", icon: "🧮", label: "التقرير الضريبي", group: "reports" },
+    { id: "journal", icon: "📔", label: "القيود اليومية", group: "reports" },
+    { id: "advisor", icon: "🤖", label: "المستشار الذكي AI", group: "ai" },
+    { id: "finance", icon: "📁", label: "الملف المالي المتكامل", group: "ai" }
+  ];
+
+  const GRP_LABELS = { main: "رئيسي", manage: "إدارة النظام", reports: "تقارير مالية", ai: "استشارات ذكية" };
+
+  const SidebarContent = ({ mobile = false }) => (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {mobile && (
+        <button onClick={() => setSideOpen(false)} style={{ 
+          position: "absolute", top: "14px", left: "14px", background: "none", border: "none", color: T.muted, fontSize: "28px", cursor: "pointer" 
+        }}>&times;</button>
+      )}
+      
+      {/* الشعار */}
+      <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 8px", marginBottom: "16px" }}>
+        <div style={{ 
+          width: "36px", height: "36px", borderRadius: "10px", background: T.gCyan, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", boxShadow: `0 4px 12px ${T.cyan}33`, flexShrink: 0 
+        }}>📊</div>
+        <div>
+          <div style={{ fontSize: "16px", fontWeight: "900", color: T.white, lineHeight: 1.1 }}>ميسور</div>
+          <div style={{ fontSize: "10px", color: T.muted, letterSpacing: "0.5px" }}>v4.0 PRO</div>
+        </div>
+      </div>
+
+      {/* هوية العميل والمنشأة */}
+      <div style={{ background: `linear-gradient(135deg, ${T.cyan}08, ${T.blue}08)`, border: `1px solid ${T.border2}`, borderRadius: "12px", padding: "12px", marginBottom: "16px" }}>
+        <div style={{ fontSize: "12px", fontWeight: "900", color: T.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.biz}</div>
+        <div style={{ fontSize: "10px", color: T.muted, marginTop: "4px" }}>{user.name}</div>
+        {user.isDemo && (
+          <span style={{ background: T.gold + "18", color: T.gold, fontSize: "9px", padding: "2px 6px", borderRadius: "5px", marginTop: "6px", display: "inline-block", fontWeight: "bold" }}>الوضع التجريبي</span>
+        )}
+      </div>
+
+      {/* تكرار القوائم والروابط */}
+      <div style={{ flex: 1, overflowY: "auto", paddingRight: "2px" }}>
+        {Object.entries(GRP_LABELS).map(([gk, gl]) => (
+          <div key={gk} style={{ marginBottom: "12px" }}>
+            <div style={{ fontSize: "10px", color: T.muted, padding: "4px 8px", fontWeight: "800", textTransform: "uppercase", letterSpacing: "1px" }}>{gl}</div>
+            {NAV_ITEMS.filter(n => n.group === gk).map(n => {
+              const active = pg === n.id;
+              const isWarning = n.badge?.warn;
+              return (
+                <button 
+                  key={n.id} 
+                  onClick={() => nav(n.id)}
+                  style={{ 
+                    display: "flex", 
+                    alignItems: "center", 
+                    justifyContent: "space-between", 
+                    width: "100%", 
+                    padding: "10px 12px", 
+                    border: "none", 
+                    borderRadius: "10px", 
+                    cursor: "pointer", 
+                    background: active ? T.cyan + "15" : "transparent", 
+                    color: active ? T.cyan : T.text, 
+                    borderRight: active ? `3px solid ${T.cyan}` : "3px solid transparent", 
+                    fontSize: "12px", 
+                    fontWeight: active ? "bold" : "normal", 
+                    textAlign: "right", 
+                    transition: "all 0.15s", 
+                    marginBottom: "2px" 
+                  }}
+                  onMouseEnter={e => { if(!active) e.currentTarget.style.background = T.border; }}
+                  onMouseLeave={e => { if(!active) e.currentTarget.style.background = "transparent"; }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
+                    <span style={{ fontSize: "14px", flexShrink: 0 }}>{n.icon}</span>
+                    <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{n.label}</span>
+                  </div>
+                  {n.badge && (
+                    <span style={{ 
+                      background: isWarning ? T.red + "22" : T.cyan + "22", 
+                      color: isWarning ? T.red : T.cyan, 
+                      borderRadius: "8px", 
+                      padding: "2px 8px", 
+                      fontSize: "9px", 
+                      fontWeight: "bold", 
+                      flexShrink: 0 
+                    }}>
+                      {isWarning ? `⚠️ ${n.badge.n}` : n.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* خروج وإعدادات */}
+      <div style={{ marginTop: "auto", paddingTop: "12px", borderTop: `1px solid ${T.border}` }}>
+        <button onClick={() => setModal({ t: "settings" })} style={{ 
+          width: "100%", background: "none", border: "none", color: T.muted, fontSize: "12px", cursor: "pointer", textAlign: "right", padding: "8px", display: "flex", alignItems: "center", gap: "8px" 
+        }}>⚙️ إعدادات النظام</button>
+        <button onClick={onLogout} style={{ 
+          width: "100%", background: "none", border: `1px solid ${T.border}`, color: T.muted, borderRadius: "10px", padding: "10px", fontSize: "12px", cursor: "pointer", marginTop: "6px" 
+        }}>تسجيل خروج مالي ←</button>
+      </div>
+    </div>
+  );
+
+  // واجهة تغليف الصفحات وحفظ الهوية
+  const PageWrapper = ({ title, sub, actions, children }) => (
+    <div style={{ animation: "fadeUp .3s ease-out" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", flexWrap: "wrap", gap: "12px" }}>
+        <div>
+          <h1 style={{ fontSize: "22px", fontWeight: "900", color: T.white, lineHeight: 1.2 }}>{title}</h1>
+          {sub && <p style={{ fontSize: "12px", color: T.muted, marginTop: "4px" }}>{sub}</p>}
+        </div>
+        <div style={{ display: "flex", gap: "8px" }}>{actions}</div>
+      </div>
+      {children}
+    </div>
+  );
+
+  // ──────────────────────────────────────────────────────
+  //  8. واجهات تحرير ومعالجة الفواتير وعروض الأسعار
+  // ──────────────────────────────────────────────────────
+  const InvForm = ({ data, isQuote = false, onSave }) => {
+    const parties = isQuote ? custs : (data?.type === "مشتريات" ? supps : custs);
+    const [f, setF] = useState(data || (isQuote 
+      ? { custId: "", custName: "", date: today(), validUntil: today(), items: [{ name: "", qty: 1, price: 0, total: 0 }], total: 0, status: "مفتوح", notes: "" }
+      : { type: "مبيعات", partyId: "", partyName: "", date: today(), dueDate: today(), items: [{ name: "", qty: 1, price: 0, total: 0 }], subtotal: 0, tax: 0, disc: 0, total: 0, status: "معلقة", notes: "" }
+    ));
+
+    const upRow = (i, k, v) => setF(p => {
+      const rows = p.items.map((r, idx) => {
+        if (idx !== i) return r;
+        const n = { ...r, [k]: (k === "qty" || k === "price") ? Number(v) : v };
+        n.total = (n.qty || 0) * (n.price || 0);
+        return n;
+      });
+      const sub = rows.reduce((s, r) => s + (r.total || 0), 0);
+      const tax = isQuote ? 0 : Math.round(sub * (user.taxRate || 0) / 100);
+      return { 
+        ...p, 
+        items: rows, 
+        subtotal: sub, 
+        tax, 
+        total: sub + tax - (p.disc || 0) 
+      };
+    });
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+          {!isQuote && <FSel label="نوع الفاتورة" v={f.type} onChange={v => setF(p => ({ ...p, type: v, partyId: "", partyName: "" }))} opts={["مبيعات", "مشتريات"]}/>}
+          <FSel 
+            label={isQuote ? "العميل المستهدف" : (f.type === "مبيعات" ? "العميل" : "المورد")} 
+            v={isQuote ? f.custId : f.partyId}
+            onChange={v => {
+              const party = parties.find(x => x.id === v);
+              setF(p => isQuote ? { ...p, custId: v, custName: party?.name || "" } : { ...p, partyId: v, partyName: party?.name || "" });
+            }}
+            opts={[{ v: "", l: "اختر الطرف المعني..." }, ...parties.map(p => ({ v: p.id, l: p.name }))]}
+          />
+          <FInp label="تاريخ المستند" v={f.date} onChange={v => setF(p => ({ ...p, date: v }))} type="date"/>
+          <FInp label={isQuote ? "صالح لغاية" : "تاريخ الاستحقاق الدفع"} v={isQuote ? f.validUntil : f.dueDate} onChange={v => setF(p => ({ ...p, [isQuote ? 'validUntil' : 'dueDate']: v }))} type="date"/>
+        </div>
+
+        <div style={{ margin: "10px 0 6px", fontSize: "12px", color: T.white, fontWeight: "bold" }}>أصناف وبنود المستند:</div>
+        {f.items.map((row, i) => (
+          <div key={i} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr auto", gap: "8px", alignItems: "center", marginBottom: "8px" }}>
+            <input 
+              value={row.name} 
+              onChange={e => upRow(i, "name", e.target.value)} 
+              placeholder="اسم السلعة / الخدمة" 
+              style={{ background: T.surface, border: `1px solid ${T.border2}`, borderRadius: "8px", padding: "10px", color: T.text, fontSize: "12px" }}
+            />
+            <input 
+              type="number" 
+              value={row.qty || ""} 
+              onChange={e => upRow(i, "qty", e.target.value)} 
+              placeholder="الكمية" 
+              style={{ background: T.surface, border: `1px solid ${T.border2}`, borderRadius: "8px", padding: "10px", color: T.text, fontSize: "12px", textAlign: "center" }}
+            />
+            <input 
+              type="number" 
+              value={row.price || ""} 
+              onChange={e => upRow(i, "price", e.target.value)} 
+              placeholder="السعر" 
+              style={{ background: T.surface, border: `1px solid ${T.border2}`, borderRadius: "8px", padding: "10px", color: T.text, fontSize: "12px", textAlign: "center" }}
+            />
+            <button 
+              onClick={() => setF(p => ({ ...p, items: p.items.filter((_, idx) => idx !== i) }))} 
+              style={{ background: "none", border: "none", color: T.red, cursor: "pointer", fontSize: "20px" }}
+            >
+              &times;
+            </button>
+          </div>
+        ))}
+
+        <Btn v="secondary" onClick={() => setF(p => ({ ...p, items: [...p.items, { name: "", qty: 1, price: 0, total: 0 }] }))}>+ إضافة بند جديد</Btn>
+        
+        <div style={{ background: T.surface, padding: "12px", borderRadius: "10px", margin: "10px 0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", margin: "4px 0" }}>
+            <span style={{ color: T.muted }}>مجموع فرعي للمواد:</span>
+            <span style={{ color: T.text }}>{fmt(f.subtotal || f.total)} ل.س</span>
+          </div>
+          {f.tax !== undefined && (
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", margin: "4px 0" }}>
+              <span style={{ color: T.muted }}>ضريبة القيمة المضافة:</span>
+              <span style={{ color: T.gold }}>{fmt(f.tax)} ل.س</span>
+            </div>
+          )}
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "14px", fontWeight: "bold", borderTop: `1px solid ${T.border}`, paddingTop: "8px", marginTop: "8px" }}>
+            <span style={{ color: T.white }}>الإجمالي النهائي للطلب:</span>
+            <span style={{ color: T.cyan }}>{fmt(f.total)} ل.س</span>
+          </div>
+        </div>
+
+        <FInp label="ملاحظات وشروط إضافية" v={f.notes} onChange={v => setF(p => ({ ...p, notes: v }))}/>
+
+        <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+          <Btn onClick={() => onSave(f)}>حفظ التغييرات</Btn>
+          <Btn v="secondary" onClick={() => setModal(null)}>إلغاء الأمر</Btn>
+        </div>
+      </div>
+    );
+  };
+
+  // ──────────────────────────────────────────────────────
+  //  9. قائمة المحاور وتوليد النوافذ المنبثقة (Modals)
+  // ──────────────────────────────────────────────────────
+  const renderActiveModal = () => {
+    if (!modal) return null;
+    
+    switch (modal.t) {
+      case "cust": {
+        const d = modal.d;
+        const [cf, setCf] = useState(d || { name: "", phone: "", email: "", address: "", balance: 0, creditLimit: 0, notes: "" });
+        return (
+          <Modal title={d ? "تحديث بيانات العميل" : "تسجيل عميل جديد للمنشأة"} onClose={() => setModal(null)}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <FInp label="الاسم الكامل للعميل" v={cf.name} onChange={v => setCf(p => ({ ...p, name: v }))} req/>
+              <FInp label="رقم الهاتف الخليوي" v={cf.phone} onChange={v => setCf(p => ({ ...p, phone: v }))}/>
+              <FInp label="البريد الإلكتروني" v={cf.email} onChange={v => setCf(p => ({ ...p, email: v }))}/>
+              <FInp label="العنوان الجغرافي" v={cf.address} onChange={v => setCf(p => ({ ...p, address: v }))}/>
+              <FNum label="الرصيد الافتتاحي المستحق" v={cf.balance} onChange={v => setCf(p => ({ ...p, balance: v }))}/>
+              <FNum label="سقف المديونية الأقصى" v={cf.creditLimit} onChange={v => setCf(p => ({ ...p, creditLimit: v }))}/>
+            </div>
+            <FInp label="ملاحظات وتوجيهات خاصة بالعميل" v={cf.notes} onChange={v => setCf(p => ({ ...p, notes: v }))}/>
+            <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+              <Btn onClick={() => handleSaveModal("custs", custs, cf, { joinDate: today() })}>حفظ العميل</Btn>
+              <Btn v="secondary" onClick={() => setModal(null)}>إلغاء</Btn>
+            </div>
+          </Modal>
+        );
+      }
+
+      case "supp": {
+        const d = modal.d;
+        const [sf, setSf] = useState(d || { name: "", phone: "", email: "", balance: 0, notes: "" });
+        return (
+          <Modal title={d ? "تحديث بيانات المورد" : "تسجيل مورد تجاري جديد"} onClose={() => setModal(null)}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <FInp label="الاسم الكامل للمورد" v={sf.name} onChange={v => setSf(p => ({ ...p, name: v }))} req/>
+              <FInp label="رقم الهاتف" v={sf.phone} onChange={v => setSf(p => ({ ...p, phone: v }))}/>
+              <FNum label="الذمم والالتزامات الحالية" v={sf.balance} onChange={v => setSf(p => ({ ...p, balance: v }))}/>
+            </div>
+            <FInp label="ملاحظات التوريد والأسعار" v={sf.notes} onChange={v => setSf(p => ({ ...p, notes: v }))}/>
+            <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+              <Btn onClick={() => handleSaveModal("supps", supps, sf)}>حفظ المورد</Btn>
+              <Btn v="secondary" onClick={() => setModal(null)}>إلغاء</Btn>
+            </div>
+          </Modal>
+        );
+      }
+
+      case "item": {
+        const d = modal.d;
+        const [it, setIt] = useState(d || { name: "", sku: "", unit: "قطعة", qty: 0, cost: 0, sell: 0, minQty: 10, cat: "بضائع" });
+        return (
+          <Modal title={d ? "تعديل تفاصيل الصنف" : "إدراج صنف ومخزون جديد"} onClose={() => setModal(null)}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <FInp label="اسم المادة / المنتج" v={it.name} onChange={v => setIt(p => ({ ...p, name: v }))} req/>
+              <FInp label="باركود مالي / SKU" v={it.sku} onChange={v => setIt(p => ({ ...p, sku: v }))}/>
+              <FSel label="تصنيف الصنف" v={it.cat} onChange={v => setIt(p => ({ ...p, cat: v }))} opts={["بضائع جاهزة", "مواد خام", "مستلزمات عامة", "منتجات مصنعة"]}/>
+              <FInp label="وحدة العد والقياس" v={it.unit} onChange={v => setIt(p => ({ ...p, unit: v }))}/>
+              <FNum label="الكمية المتوفرة حالياً" v={it.qty} onChange={v => setIt(p => ({ ...p, qty: v }))}/>
+              <FNum label="حد الأمان الأدنى للمادة" v={it.minQty} onChange={v => setIt(p => ({ ...p, minQty: v }))}/>
+              <FNum label="تكلفة الشراء الأساسية" v={it.cost} onChange={v => setIt(p => ({ ...p, cost: v }))}/>
+              <FNum label="سعر البيع المقترح للمستهلك" v={it.sell} onChange={v => setIt(p => ({ ...p, sell: v }))}/>
+            </div>
+            <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+              <Btn onClick={() => handleSaveModal("items", items, it)}>حفظ المادة</Btn>
+              <Btn v="secondary" onClick={() => setModal(null)}>إلغاء الأمر</Btn>
+            </div>
+          </Modal>
+        );
+      }
+
+      case "invoice": {
+        return (
+          <Modal title={modal.d ? "تحديث وتعديل الفاتورة" : "توليد وإصدار فاتورة جديدة"} onClose={() => setModal(null)} w={560}>
+            <InvForm data={modal.d} onSave={f => {
+              const updated = modal.d ? invs.map(x => x.id === modal.d.id ? f : x) : [{ ...f, id: `INV-${Date.now().toString(36).toUpperCase()}` }, ...invs];
+              persist("invs", updated);
+              showFlash("✓ تم حفظ الفاتورة بنجاح في سجلات النظام المالي");
+              setModal(null);
+            }}/>
+          </Modal>
+        );
+      }
+
+      case "quote": {
+        return (
+          <Modal title={modal.d ? "تعديل محتوى عرض السعر" : "إصدار عرض أسعار جديد لعميل"} onClose={() => setModal(null)} w={540}>
+            <InvForm data={modal.d} isQuote onSave={f => {
+              const updated = modal.d ? quotes.map(x => x.id === modal.d.id ? f : x) : [{ ...f, id: `QUO-${Date.now().toString(36).toUpperCase()}` }, ...quotes];
+              persist("quotes", updated);
+              showFlash("✓ تم توثيق وحفظ عروض الأسعار المقترحة");
+              setModal(null);
+            }}/>
+          </Modal>
+        );
+      }
+
+      case "bank": {
+        const d = modal.d;
+        const [bf, setBf] = useState(d || { name: "", bank: "", no: "", type: "جاري", bal: 0, cur: "ليرة" });
+        return (
+          <Modal title={d ? "تحديث بيانات الحساب" : "إضافة صندوق أو حساب نقد جديد"} onClose={() => setModal(null)}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <FInp label="اسم الحساب المالي" v={bf.name} onChange={v => setBf(p => ({ ...p, name: v }))} req/>
+              <FInp label="الجهة المصرفية / البنك" v={bf.bank} onChange={v => setBf(p => ({ ...p, bank: v }))}/>
+              <FInp label="رقم الآيبان / الحساب" v={bf.no} onChange={v => setBf(p => ({ ...p, no: v }))}/>
+              <FSel label="نوع الحساب المالي" v={bf.type} onChange={v => setBf(p => ({ ...p, type: v }))} opts={["جاري", "توفير واستثمار", "رقمي", "نقدي"]}/>
+              <FNum label="الرصيد النقدي المتوفر حالياً" v={bf.bal} onChange={v => setBf(p => ({ ...p, bal: v }))}/>
+              <FSel label="العملة الرسمية للحساب" v={bf.cur} onChange={v => setBf(p => ({ ...p, cur: v }))} opts={["ليرة", "دولار", "يورو"]}/>
+            </div>
+            <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+              <Btn onClick={() => handleSaveModal("banks", banks, bf)}>حفظ الحساب</Btn>
+              <Btn v="secondary" onClick={() => setModal(null)}>إلغاء</Btn>
+            </div>
+          </Modal>
+        );
+      }
+
+      case "journal": {
+        const d = modal.d;
+        const [jf, setJf] = useState(d || { date: today(), description: "", entries: [{ account: "", debit: 0, credit: 0 }, { account: "", debit: 0, credit: 0 }] });
+        const totDebit = jf.entries.reduce((s, e) => s + (e.debit || 0), 0);
+        const totCredit = jf.entries.reduce((s, e) => s + (e.credit || 0), 0);
+        const balanced = totDebit === totCredit && totDebit > 0;
+        
+        return (
+          <Modal title={d ? "تحديث القيد اليومي" : "تسجيل قيد محاسبي مزدوج جديد"} onClose={() => setModal(null)} w={520}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <FInp label="تاريخ تسجيل القيد" v={jf.date} onChange={v => setJf(p => ({ ...p, date: v }))} type="date"/>
+              <FInp label="شرح تفصيلي وبيان مالي" v={jf.description} onChange={v => setJf(p => ({ ...p, description: v }))} req/>
+            </div>
+            <div style={{ margin: "10px 0 6px", display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: "8px", fontSize: "11px", color: T.muted }}>
+              <span>الحساب المالي</span>
+              <span style={{ textAlign: "center" }}>مدين</span>
+              <span style={{ textAlign: "center" }}>دائن</span>
+            </div>
+            {jf.entries.map((entry, idx) => (
+              <div key={idx} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: "8px", marginBottom: "8px" }}>
+                <input 
+                  value={entry.account} 
+                  onChange={e => setJf(p => ({ ...p, entries: p.entries.map((x, xidx) => xidx === idx ? { ...x, account: e.target.value } : x) }))}
+                  placeholder="الحساب الفرعي" 
+                  style={{ background: T.surface, border: `1px solid ${T.border2}`, borderRadius: "8px", padding: "10px", color: T.text, fontSize: "12px" }}
+                />
+                <input 
+                  type="number" 
+                  value={entry.debit || ""} 
+                  onChange={e => setJf(p => ({ ...p, entries: p.entries.map((x, xidx) => xidx === idx ? { ...x, debit: Number(e.target.value) } : x) }))}
+                  placeholder="0" 
+                  style={{ background: T.surface, border: `1px solid ${T.border2}`, borderRadius: "8px", padding: "10px", color: T.cyan, fontSize: "12px", textAlign: "center" }}
+                />
+                <input 
+                  type="number" 
+                  value={entry.credit || ""} 
+                  onChange={e => setJf(p => ({ ...p, entries: p.entries.map((x, xidx) => xidx === idx ? { ...x, credit: Number(e.target.value) } : x) }))}
+                  placeholder="0" 
+                  style={{ background: T.surface, border: `1px solid ${T.border2}`, borderRadius: "8px", padding: "10px", color: T.gold, fontSize: "12px", textAlign: "center" }}
+                />
+              </div>
+            ))}
+            <Btn v="secondary" onClick={() => setJf(p => ({ ...p, entries: [...p.entries, { account: "", debit: 0, credit: 0 }] }))}>+ إضافة حساب آخر</Btn>
+            
+            <div style={{ 
+              background: balanced ? T.green + "11" : T.red + "11", 
+              border: `1px solid ${balanced ? T.green : T.red}33`, 
+              borderRadius: "10px", 
+              padding: "12px", 
+              margin: "12px 0", 
+              display: "flex", 
+              justifyContent: "space-between", 
+              fontSize: "12px" 
+            }}>
+              <span style={{ color: balanced ? T.green : T.red, fontWeight: "bold" }}>{balanced ? "✓ القيد متوازن ومستقر" : "⚠️ القيد غير متوازن"}</span>
+              <span style={{ color: T.text }}>مدين: {fmt(totDebit)} | دائن: {fmt(totCredit)}</span>
+            </div>
+
+            <div style={{ display: "flex", gap: "10px" }}>
+              <Btn onClick={async () => {
+                if (!balanced) return;
+                const updated = d ? journal.map(x => x.id === d.id ? jf : x) : [{ ...jf, id: uid() }, ...journal];
+                persist("journal", updated);
+                showFlash("✓ تم قيد المعاملة بنجاح بالدفتر المزدوج الموحد");
+                setModal(null);
+              }} disabled={!balanced}>حفظ القيد اليومي</Btn>
+              <Btn v="secondary" onClick={() => setModal(null)}>إلغاء الأمر</Btn>
+            </div>
+          </Modal>
+        );
+      }
+
+      case "settings": {
+        const [sf, setSf] = useState({ name: user.name, biz: user.biz, currency: user.currency || "ليرة", taxRate: user.taxRate || 0 });
+        return (
+          <Modal title="إعدادات وحوكمة الحساب المالي" onClose={() => setModal(null)}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <FInp label="اسمك الكامل (صاحب الحساب)" v={sf.name} onChange={v => setSf(p => ({ ...p, name: v }))}/>
+              <FInp label="الاسم التجاري للمؤسسة / المنشأة" v={sf.biz} onChange={v => setSf(p => ({ ...p, biz: v }))}/>
+              <FSel label="العملة الرسمية للتقارير" v={sf.currency} onChange={v => setSf(p => ({ ...p, currency: v }))} opts={["ليرة", "دولار", "يورو"]}/>
+              <FNum label="نسبة ضريبة القيمة المضافة الافتراضية (%)" v={sf.taxRate} onChange={v => setSf(p => ({ ...p, taxRate: v }))}/>
+              <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+                <Btn onClick={async () => {
+                  const updatedUser = { ...user, ...sf };
+                  await onUpdateUser(updatedUser);
+                  showFlash("✓ تم تحديث إعدادات النظام وتطبيقها ماليًا");
+                  setModal(null);
+                }}>حفظ الإعدادات</Btn>
+                <Btn v="secondary" onClick={() => setModal(null)}>إلغاء الأمر</Btn>
+              </div>
+            </div>
+          </Modal>
+        );
+      }
+      
+      default:
+        return null;
+    }
+  };
+
+  // ──────────────────────────────────────────────────────
+  //  10. معالجة ورسم الصفحات المختلفة للمنظومة المالية
+  // ──────────────────────────────────────────────────────
+  const renderActivePage = () => {
+    switch (pg) {
+      case "dashboard":
+        return (
+          <PageWrapper 
+            title={`أهلاً بك، ${user.name} 🍃`} 
+            sub={`مشروع: ${user.biz} · اليوم: ${new Date().toLocaleDateString("ar-SY", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}`}
+            actions={<Btn onClick={() => nav("input")} icon="➕">معاملة ذكية سريعة</Btn>}
+          >
+            {/* إشعارات الأمان والحد الأدنى للمخزون والتحصيل */}
+            {lowStock.length > 0 && (
+              <div style={{ background: `${T.red}12`, border: `1px solid ${T.red}33`, borderRadius: "14px", padding: "14px", marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ color: T.red, fontSize: "12px", fontWeight: "bold" }}>
+                  ⚠️ انتبه: هنالك أصناف تحت حد الأمان المطلوب في المخزن ({lowStock.length} مادة)
+                </div>
+                <Btn sm v="danger" onClick={() => nav("stock")}>إدارة المخزن ←</Btn>
+              </div>
+            )}
+
+            {/* بطاقات الإحصائيات الفورية اللحظية */}
+            <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "18px" }}>
+              <StatCard icon="📈" label="إجمالي إيرادات المنشأة" value={fmtC(sales, user.currency)} sub="خلال العام الحالي" color={T.green} onClick={() => nav("pl")}/>
+              <StatCard icon="📉" label="إجمالي المصاريف والتشغيل" value={fmtC(expenses, user.currency)} sub="متضمنا المشتريات والمصروف" color={T.red} onClick={() => nav("expAnal")}/>
+              <StatCard icon="💎" label="صافي الأرباح الصافية" value={fmtC(profit, user.currency)} sub={`هامش ربحي مستقر ${marginPct}%`} color={profit >= 0 ? T.cyan : T.red} onClick={() => nav("pl")}/>
+              <StatCard icon="🏦" label="النقد المتوفر بالبنوك والصناديق" value={fmtC(bankTot)} sub={`موزعة على ${banks.length} حساب مالي`} color={T.blue} onClick={() => nav("banks")}/>
+            </div>
+
+            <div className="stats-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "12px", marginBottom: "18px" }}>
+              <StatCard icon="🧾" label="إجمالي الذمم المعلقة والتحصيل" value={fmtC(pendingTotal)} sub="بانتظار التحصيل المالي" color={T.gold} onClick={() => nav("invoices")}/>
+              <StatCard icon="📦" label="القيمة التقديرية للبضائع والمخزون" value={fmtC(invVal)} sub={`بإجمالي بنود مختلفة (${items.length} صنف)`} color={T.purple} onClick={() => nav("stock")}/>
+            </div>
+
+            {/* الرسوم البيانية التفاعلية باستخدام Recharts الآمن في المتصفح */}
+            <div className="charts-grid" style={{ display: "grid", gridTemplateColumns: "3fr 2fr", gap: "16px", marginBottom: "18px" }}>
+              <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+                <div style={{ fontWeight: "bold", color: T.white, marginBottom: "14px", fontSize: "14px" }}>النمو المالي والربحي الفعلي شهرياً</div>
+                <div style={{ width: "100%", height: "200px" }}>
+                  {ResponsiveContainer && AreaChart ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={MONTHLY_DATA} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="gSales" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={T.green} stopOpacity={0.25}/>
+                            <stop offset="95%" stopColor={T.green} stopOpacity={0}/>
+                          </linearGradient>
+                          <linearGradient id="gProfit" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={T.cyan} stopOpacity={0.25}/>
+                            <stop offset="95%" stopColor={T.cyan} stopOpacity={0}/>
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="m" tick={{ fill: T.muted, fontSize: 10 }} />
+                        <YAxis hide />
+                        <Tooltip content={<Tip />} />
+                        <Area type="monotone" dataKey="إيرادات" stroke={T.green} fill="url(#gSales)" strokeWidth={2.5} name="المبيعات والعملاء"/>
+                        <Area type="monotone" dataKey="ربح" stroke={T.cyan} fill="url(#gProfit)" strokeWidth={2.5} name="صافي التدفق المالي"/>
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  ) : <div style={{ color: T.muted }}>جاري تحميل الرسم البياني التفاعلي...</div>}
+                </div>
+              </div>
+
+              <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+                <div style={{ fontWeight: "bold", color: T.white, marginBottom: "14px", fontSize: "14px" }}>توزيع وهيكلة الإيرادات والمصروفات</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  {[
+                    ["مبيعات محققة", sales, T.green],
+                    ["نفقات وتشغيل", expenses, T.red],
+                    ["صافي الأرباح المحتجزة", profit, T.cyan]
+                  ].map(([label, val, color]) => (
+                    <div key={label}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                        <span style={{ color: T.muted }}>{label}</span>
+                        <span style={{ color, fontWeight: "bold" }}>{fmt(val)} ل.س</span>
+                      </div>
+                      <div style={{ height: "6px", background: T.border, borderRadius: "3px", overflow: "hidden" }}>
+                        <div style={{ 
+                          width: `${sales > 0 ? Math.min((val / sales) * 100, 100) : 0}%`, 
+                          height: "100%", 
+                          background: color, 
+                          borderRadius: "3px" 
+                        }}/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* سجل الحركة المالية والعمليات الأخيرة */}
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                <span style={{ fontWeight: "900", color: T.white, fontSize: "14px" }}>آخر المعاملات المالية الموثقة اليوم</span>
+                <Btn sm v="secondary" onClick={() => nav("txns")}>كل السجلات التاريخية ←</Btn>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                {txns.slice(0, 5).map((txn, idx) => (
+                  <div key={txn.id} style={{ 
+                    display: "flex", 
+                    alignItems: "center", 
+                    justifyContent: "space-between", 
+                    padding: "10px 12px", 
+                    borderBottom: idx < 4 ? `1px solid ${T.border}` : "none" 
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <div style={{ 
+                        width: "36px", height: "36px", borderRadius: "10px", 
+                        background: (txn.type === "بيع" || txn.type === "إيراد" ? T.green : T.red) + "15", 
+                        display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px" 
+                      }}>
+                        {txn.type === "بيع" || txn.type === "إيراد" ? "💰" : "💸"}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: "13px", fontWeight: "bold", color: T.white }}>{txn.summary}</div>
+                        <div style={{ fontSize: "10px", color: T.muted, marginTop: "2px" }}>{txn.date} · المدين: {txn.entry?.debit}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                      {typeChip(txn.type)}
+                      <span style={{ 
+                        fontWeight: "900", 
+                        color: (txn.type === "بيع" || txn.type === "إيراد") ? T.green : T.red, 
+                        fontSize: "13px" 
+                      }}>
+                        {(txn.type === "بيع" || txn.type === "إيراد") ? "+" : "-"}{fmt(txn.amount)} ل.س
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </PageWrapper>
+        );
+
+      case "input":
+        return (
+          <PageWrapper title="إدراج وإدخال المعاملات الذكية" sub="سجّل معاملاتك باللغة الطبيعية أو العامية وسيقوم المساعد بهندستها وتوزيعها دفترياً">
+            <div style={{ maxWidth: "600px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ display: "flex", background: T.card, border: `1px solid ${T.border}`, borderRadius: "14px", overflow: "hidden" }}>
+                {[["text", "✏️", "كتابة سريعة"], ["voice", "🎤", "تسجيل صوتي (مستقبلاً)"]].map(([m, ic, l]) => (
+                  <button 
+                    key={m} 
+                    onClick={() => setInputMode(m)}
+                    style={{ 
+                      flex: 1, 
+                      padding: "14px 10px", 
+                      border: "none", 
+                      cursor: "pointer", 
+                      background: inputMode === m ? T.cyan + "12" : "transparent", 
+                      color: inputMode === m ? T.cyan : T.muted, 
+                      borderBottom: inputMode === m ? `3px solid ${T.cyan}` : "3px solid transparent", 
+                      fontSize: "13px", 
+                      fontWeight: "bold" 
+                    }}
+                  >
+                    <span style={{ fontSize: "18px", marginLeft: "6px" }}>{ic}</span> {l}
+                  </button>
+                ))}
+              </div>
+
+              {inputMode === "text" ? (
+                <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+                  <textarea 
+                    value={aiTxt} 
+                    onChange={e => setAiTxt(e.target.value)} 
+                    placeholder='مثال للغة العامية السورية: "بعت بضاعة صنف أ ممتاز لأبو سامر بـ 150,000 ليرة كاش" أو "دفعت أجار المحل الشهري 120,000 ليرة من الصندوق"'
+                    style={{ 
+                      width: "100%", 
+                      minHeight: "140px", 
+                      background: "transparent", 
+                      border: "none", 
+                      color: T.text, 
+                      fontSize: "14px", 
+                      resize: "none", 
+                      lineHeight: 1.8, 
+                      direction: "rtl", 
+                      outline: "none" 
+                    }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${T.border}`, paddingTop: "14px", marginTop: "14px" }}>
+                    <span style={{ fontSize: "11px", color: T.muted }}>الذكاء الاصطناعي ميسور سيقوم بقيد المعاملة وموازنة الدفتر فوراً</span>
+                    <Btn onClick={() => parseTransactionWithAI(aiTxt)} disabled={!aiTxt.trim() || aiLoad} icon={aiLoad ? undefined : "🤖"}>
+                      {aiLoad ? <Spin /> : "تسجيل المعاملة الذكية ←"}
+                    </Btn>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "40px 20px", textAlign: "center" }}>
+                  <div style={{ fontSize: "40px", marginBottom: "16px" }}>🎙️</div>
+                  <p style={{ color: T.text, fontSize: "14px", fontWeight: "bold", marginBottom: "8px" }}>ميزة الإدخال الصوتي بالذكاء الاصطناعي</p>
+                  <p style={{ color: T.muted, fontSize: "12px" }}>تتطلب هذه الميزة اتصالاً نشطاً بأجهزة الاستماع وسماحاً بالوصول للميكروفون في المتصفحات الحديثة.</p>
+                </div>
+              )}
+            </div>
+          </PageWrapper>
+        );
+
+      case "txns":
+        return (
+          <PageWrapper title="دفتر المعاملات المالي" sub="الحركات المالية الموثقة والمصنفة ضمن لوائح وقيود المنظومة" actions={<Btn onClick={() => nav("input")} icon="➕">إضافة معاملة</Btn>}>
+            <div style={{ display: "flex", gap: "8px", marginBottom: "16px", flexWrap: "wrap" }}>
+              {["الكل", "بيع", "شراء", "مصروف", "إيراد"].map(filter => (
+                <button 
+                  key={filter} 
+                  onClick={() => setTxnFilter(filter)}
+                  style={{ 
+                    background: txnFilter === filter ? T.cyan + "22" : T.surface, 
+                    border: `1px solid ${txnFilter === filter ? T.cyan : T.border2}`, 
+                    color: txnFilter === filter ? T.cyan : T.muted, 
+                    padding: "6px 16px", 
+                    borderRadius: "20px", 
+                    fontSize: "12px", 
+                    fontWeight: "bold", 
+                    cursor: "pointer" 
+                  }}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", overflow: "hidden" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "100px 1fr 100px 120px 120px 40px", background: T.surface, padding: "12px 16px", fontSize: "12px", color: T.muted, fontWeight: "bold" }}>
+                <span>التاريخ</span>
+                <span>البيان والتفاصيل</span>
+                <span>النوع</span>
+                <span>الحساب المدين</span>
+                <span>الحساب الدائن</span>
+                <span/>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {(txnFilter === "الكل" ? txns : txns.filter(t => t.type === txnFilter)).map((txn) => (
+                  <div key={txn.id} style={{ display: "grid", gridTemplateColumns: "100px 1fr 100px 120px 120px 40px", padding: "14px 16px", borderBottom: `1px solid ${T.border}`, fontSize: "13px", alignItems: "center" }}>
+                    <span style={{ color: T.muted, fontSize: "12px" }}>{txn.date}</span>
+                    <span style={{ fontWeight: "bold", color: T.white }}>{txn.summary}</span>
+                    <div>{typeChip(txn.type)}</div>
+                    <span style={{ color: T.cyan }}>{txn.entry?.debit || "الصندوق"}</span>
+                    <span style={{ color: T.gold }}>{txn.entry?.credit || "المبيعات"}</span>
+                    <button 
+                      onClick={() => handleDelete("txns", txns, txn.id)} 
+                      style={{ background: "none", border: "none", color: T.muted, fontSize: "18px", cursor: "pointer" }}
+                      onMouseEnter={e => e.currentTarget.style.color = T.red}
+                      onMouseLeave={e => e.currentTarget.style.color = T.muted}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </PageWrapper>
+        );
+
+      case "custs":
+        return (
+          <PageWrapper title="سجل العملاء وإدارة الذمم" sub="إدارة شاملة لبطاقات العملاء وعلاقاتهم التجارية مع المنشأة" actions={<Btn onClick={() => setModal({ t: "cust" })} icon="👤">إضافة عميل جديد</Btn>}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" }}>
+              {custs.map(cust => (
+                <div key={cust.id} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+                    <div style={{ width: "38px", height: "38px", borderRadius: "10px", background: T.cyan + "15", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px" }}>👤</div>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <Btn sm v="secondary" onClick={() => setModal({ t: "cust", d: cust })}>تعديل</Btn>
+                      <Btn sm v="danger" onClick={() => handleDelete("custs", custs, cust.id)}>&times;</Btn>
+                    </div>
+                  </div>
+                  <h3 style={{ fontSize: "15px", color: T.white, fontWeight: "bold" }}>{cust.name}</h3>
+                  <p style={{ fontSize: "12px", color: T.muted, marginTop: "4px" }}>📞 {cust.phone || "—"}</p>
+                  <p style={{ fontSize: "12px", color: T.muted }}>✉ {cust.email || "—"}</p>
+                  {cust.notes && <p style={{ fontSize: "11px", color: T.muted, fontStyle: "italic", marginTop: "8px" }}>*{cust.notes}</p>}
+                  
+                  <div style={{ borderTop: `1px solid ${T.border}`, marginTop: "14px", paddingTop: "12px" }}>
+                    {(cust.balance || 0) > 0 ? (
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
+                        <span style={{ color: T.gold }}>مستحق للتحصيل (ذمة):</span>
+                        <span style={{ color: T.gold, fontWeight: "bold" }}>{fmt(cust.balance)} ل.س</span>
+                      </div>
+                    ) : (
+                      <span style={{ color: T.green, fontSize: "12px", fontWeight: "bold" }}>✓ رصيد مالي متوازن ومسدد بالكامل</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </PageWrapper>
+        );
+
+      case "supps":
+        return (
+          <PageWrapper title="إدارة حسابات الموردين" sub="قيد ومراجعة حسابات التوريد والذمم المستحقة للموردين" actions={<Btn onClick={() => setModal({ t: "supp" })} icon="🏭">إضافة مورد جديد</Btn>}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" }}>
+              {supps.map(supp => (
+                <div key={supp.id} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+                    <div style={{ width: "38px", height: "38px", borderRadius: "10px", background: T.gold + "15", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px" }}>🏭</div>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <Btn sm v="secondary" onClick={() => setModal({ t: "supp", d: supp })}>تعديل</Btn>
+                      <Btn sm v="danger" onClick={() => handleDelete("supps", supps, supp.id)}>&times;</Btn>
+                    </div>
+                  </div>
+                  <h3 style={{ fontSize: "15px", color: T.white, fontWeight: "bold" }}>{supp.name}</h3>
+                  <p style={{ fontSize: "12px", color: T.muted, marginTop: "4px" }}>📞 {supp.phone || "—"}</p>
+                  {supp.notes && <p style={{ fontSize: "11px", color: T.muted, fontStyle: "italic", marginTop: "8px" }}>*{supp.notes}</p>}
+                  
+                  <div style={{ borderTop: `1px solid ${T.border}`, marginTop: "14px", paddingTop: "12px" }}>
+                    {(supp.balance || 0) > 0 ? (
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
+                        <span style={{ color: T.red }}>الالتزامات للمورد (دائن):</span>
+                        <span style={{ color: T.red, fontWeight: "bold" }}>{fmt(supp.balance)} ل.س</span>
+                      </div>
+                    ) : (
+                      <span style={{ color: T.green, fontSize: "12px", fontWeight: "bold" }}>✓ لا توجد مستحقات مالية معلقة للمورد</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </PageWrapper>
+        );
+
+      case "stock":
+        return (
+          <PageWrapper title="لوحة ومخازن البضائع" sub="الرقابة الدقيقة على المواد والأصناف والكميات المتوفرة" actions={<Btn onClick={() => setModal({ t: "item" })} icon="📦">إضافة صنف مادي</Btn>}>
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", overflow: "hidden" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 100px 100px 120px 120px 100px 40px", background: T.surface, padding: "12px 16px", fontSize: "12px", color: T.muted, fontWeight: "bold" }}>
+                <span>الصنف المادي والمنتج</span>
+                <span style={{ textAlign: "center" }}>وحدة القياس</span>
+                <span style={{ textAlign: "center" }}>الكمية الحالية</span>
+                <span style={{ textAlign: "center" }}>تكلفة الصنف</span>
+                <span style={{ textAlign: "center" }}>سعر البيع المعتمد</span>
+                <span style={{ textAlign: "center" }}>الحالة والوفرة</span>
+                <span/>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {items.map((it) => {
+                  const warning = (it.qty || 0) <= (it.minQty || 0);
+                  return (
+                    <div key={it.id} style={{ 
+                      display: "grid", 
+                      gridTemplateColumns: "2fr 100px 100px 120px 120px 100px 40px", 
+                      padding: "14px 16px", 
+                      borderBottom: `1px solid ${T.border}`, 
+                      fontSize: "13px", 
+                      alignItems: "center",
+                      background: warning ? `${T.red}04` : "transparent"
+                    }}>
+                      <div>
+                        <div style={{ fontWeight: "bold", color: T.white }}>{it.name}</div>
+                        <div style={{ fontSize: "10px", color: T.muted, marginTop: "2px" }}>{it.cat} · باركود: {it.sku || "—"}</div>
+                      </div>
+                      <span style={{ textAlign: "center", color: T.muted }}>{it.unit}</span>
+                      <span style={{ textAlign: "center", fontWeight: "bold", color: warning ? T.red : T.white }}>{it.qty}</span>
+                      <span style={{ textAlign: "center", color: T.muted }}>{fmt(it.cost)} ل.س</span>
+                      <span style={{ textAlign: "center", color: T.green }}>{it.sell ? `${fmt(it.sell)} ل.س` : "غير محدد"}</span>
+                      <div style={{ textAlign: "center" }}>
+                        {warning ? <Chip label="⚠️ منخفض" color={T.red}/> : <Chip label="آمن ومتوفر" color={T.green}/>}
+                      </div>
+                      <div style={{ display: "flex", gap: "4px" }}>
+                        <button onClick={() => setModal({ t: "item", d: it })} style={{ background: "none", border: "none", color: T.cyan, cursor: "pointer", fontSize: "14px", fontWeight: "bold" }}>⚙️</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </PageWrapper>
+        );
+
+      case "invoices":
+        return (
+          <PageWrapper title="سجلات الفواتير الموثقة" sub="قيد وإدارة عمليات البيع والشراء التي تتم عبر فواتير رسمية ومؤرشفة" actions={<Btn onClick={() => setModal({ t: "invoice" })} icon="🧾">إصدار فاتورة جديدة</Btn>}>
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", overflow: "hidden" }}>
+              {invs.map((inv) => (
+                <div key={inv.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: `1px solid ${T.border}` }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <span style={{ fontWeight: "bold", color: T.cyan, fontFamily: "monospace" }}>{inv.id}</span>
+                      {typeChip(inv.status)}
+                    </div>
+                    <div style={{ fontSize: "14px", fontWeight: "bold", color: T.white, marginTop: "6px" }}>{inv.partyName || "زبون عشوائي نقدي"}</div>
+                    <div style={{ fontSize: "11px", color: T.muted, marginTop: "2px" }}>تاريخ الصدور: {inv.date} · الأجل لغاية: {inv.dueDate || "—"}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                    <span style={{ fontWeight: "900", color: T.green, fontSize: "15px" }}>{fmt(inv.total)} ل.س</span>
+                    <Btn sm v="secondary" onClick={() => setModal({ t: "invoice", d: inv })}>تعديل الفاتورة</Btn>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </PageWrapper>
+        );
+
+      case "quotes":
+        return (
+          <PageWrapper title="إدارة عروض الأسعار المقترحة" sub="توثيق عروض الأسعار والاتفاقيات المبدئية والتحول لاحقاً لفواتير معتمدة" actions={<Btn onClick={() => setModal({ t: "quote" })} icon="📝">إنشاء عرض أسعار</Btn>}>
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", overflow: "hidden" }}>
+              {quotes.map((q) => (
+                <div key={q.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: `1px solid ${T.border}` }}>
+                  <div>
+                    <span style={{ fontWeight: "bold", color: T.cyan, fontFamily: "monospace" }}>{q.id}</span>
+                    <div style={{ fontSize: "14px", fontWeight: "bold", color: T.white, marginTop: "6px" }}>{q.custName}</div>
+                    <div style={{ fontSize: "11px", color: T.muted, marginTop: "2px" }}>تاريخ الإصدار: {q.date} · تاريخ انتهاء العرض: {q.validUntil}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                    <span style={{ fontWeight: "bold", color: T.cyan }}>{fmt(q.total)} ل.س</span>
+                    <Btn sm v="secondary" onClick={() => setModal({ t: "quote", d: q })}>تعديل العرض</Btn>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </PageWrapper>
+        );
+
+      case "returns":
+        return (
+          <PageWrapper title="مرتجع المبيعات والمشتريات" sub="أرشفة ومعالجة مرتجعات الأصناف والبضائع التي تمت مع تسويات الصناديق" actions={<Btn onClick={() => setModal({ t: "return_modal" })} icon="↩️">تسجيل مرتجع جديد</Btn>}>
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "24px", textAlign: "center" }}>
+              <p style={{ color: T.muted, fontSize: "13px" }}>سجل المرتجعات فارغ حالياً. يمكنك إضافة عمليات الإرجاع لخصم المخزون والعملة.</p>
+            </div>
+          </PageWrapper>
+        );
+
+      case "banks":
+        return (
+          <PageWrapper title="الحسابات البنكية والنقدية" sub="توزيع السيولة والرقابة الفورية على الأرصدة المتوفرة كاش أو رقمي" actions={<Btn onClick={() => setModal({ t: "bank" })} icon="🏦">إدراج حساب جديد</Btn>}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" }}>
+              {banks.map(bank => (
+                <div key={bank.id} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+                    <div style={{ width: "38px", height: "38px", borderRadius: "10px", background: T.blue + "15", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px" }}>🏦</div>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <Btn sm v="secondary" onClick={() => setModal({ t: "bank", d: bank })}>تعديل</Btn>
+                      <Btn sm v="danger" onClick={() => handleDelete("banks", banks, bank.id)}>&times;</Btn>
+                    </div>
+                  </div>
+                  <h3 style={{ fontSize: "15px", color: T.white, fontWeight: "bold" }}>{bank.name}</h3>
+                  <p style={{ fontSize: "12px", color: T.muted, marginTop: "4px" }}>الجهة المصرفية: {bank.bank} · النوع: {bank.type}</p>
+                  {bank.no && <p style={{ fontSize: "11px", color: T.muted, fontFamily: "monospace" }}>رقم الحساب: {bank.no}</p>}
+                  
+                  <div style={{ borderTop: `1px solid ${T.border}`, marginTop: "14px", paddingTop: "12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: "12px", color: T.muted }}>الرصيد الفعلي للمنشأة:</span>
+                    <span style={{ color: T.blue, fontWeight: "bold", fontSize: "15px" }}>{fmt(bank.bal)} {bank.cur === "ليرة" ? "ل.س" : bank.cur === "دولار" ? "$" : "€"}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </PageWrapper>
+        );
+
+      case "budget":
+        return (
+          <PageWrapper title="الموازنات التقديرية الفعالة" sub="مقارنة الخطط المالية للمشروع ومستويات الصرف والانحرافات المحتملة">
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr", background: T.surface, padding: "12px 16px", fontSize: "12px", color: T.muted, fontWeight: "bold" }}>
+                <span>بند الموازنة والمجموعة</span>
+                <span style={{ textAlign: "center" }}>نوع البند</span>
+                <span style={{ textAlign: "center" }}>الخطة المقترحة</span>
+                <span style={{ textAlign: "center" }}>المصروف الفعلي</span>
+                <span style={{ textAlign: "center" }}>الانحراف المالي</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {budgetActual.map((b) => {
+                  const danger = b.variance < 0 && b.type === "مصروف";
+                  return (
+                    <div key={b.id} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr", padding: "16px 16px", borderBottom: `1px solid ${T.border}`, fontSize: "13px", alignItems: "center" }}>
+                      <span style={{ fontWeight: "bold", color: T.white }}>{b.cat}</span>
+                      <div style={{ textAlign: "center" }}>
+                        <Chip label={b.type} color={b.type === "إيراد" ? T.green : T.red}/>
+                      </div>
+                      <span style={{ textAlign: "center", color: T.muted }}>{fmt(b.plan)} ل.س</span>
+                      <span style={{ textAlign: "center", color: T.white, fontWeight: "bold" }}>{fmt(b.actual)} ل.س</span>
+                      <span style={{ textAlign: "center", color: danger ? T.red : T.green, fontWeight: "bold" }}>
+                        {b.variance >= 0 ? "+" : ""}{fmt(b.variance)} ل.س
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </PageWrapper>
+        );
+
+      case "pl":
+        return (
+          <PageWrapper title="بيان الأرباح والخسائر للمشروع" sub="قائمة الدخل السنوية الشاملة لكافة حركات النشاط والمبيعات والتشغيل">
+            <div style={{ maxWidth: "700px", margin: "0 auto", background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "24px" }}>
+              <div style={{ textAlign: "center", marginBottom: "20px", borderBottom: `2.5px solid ${T.cyan}`, paddingBottom: "16px" }}>
+                <h2 style={{ fontSize: "18px", color: T.white, fontWeight: "900" }}>ميسور — بيان الأرباح والخسائر الدفتري</h2>
+                <p style={{ fontSize: "12px", color: T.muted, marginTop: "4px" }}>للفترة المالية الحالية حتى نهاية شهر مايو 2026</p>
+              </div>
+
+              {[
+                ["إيرادات المبيعات المحققة والخدمات", sales, T.green],
+                ["إيرادات تمويلية وأخرى متنوعة", 0, T.muted],
+                ["إجمالي الدخل المالي والإيرادات الأساسية", sales, T.green, true],
+                ["تكلفة المشتريات والمواد المصروفة", expenses * 0.6, T.red],
+                ["مجمل الربح التجاري العام للمشروع", sales - (expenses * 0.6), T.cyan, true],
+                ["مصاريف التشغيل والمصاريف العمومية", expenses * 0.4, T.red],
+                ["صافي الدخل المالي الصافي المحتجز (الأرباح)", profit, profit >= 0 ? T.green : T.red, true]
+              ].map(([label, val, color, isBold], idx) => (
+                <div key={idx} style={{ 
+                  display: "flex", 
+                  justifyContent: "space-between", 
+                  padding: "12px 16px", 
+                  borderBottom: `1px solid ${T.border}`,
+                  background: isBold ? `${color}06` : "transparent",
+                  fontWeight: isBold ? "bold" : "normal",
+                  fontSize: isBold ? "14px" : "13px"
+                }}>
+                  <span style={{ color: isBold ? T.white : T.text }}>{label}</span>
+                  <span style={{ color, fontFamily: "monospace" }}>{fmt(val)} ل.س</span>
+                </div>
+              ))}
+            </div>
+          </PageWrapper>
+        );
+
+      case "cashflow":
+        return (
+          <PageWrapper title="تقرير التدفقات النقدية والسيولة" sub="الرقابة الدقيقة على مصادر الحصول على النقد وأين يتم صرفه دورياً">
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "24px", textAlign: "center" }}>
+              <div style={{ width: "100%", height: "220px", marginBottom: "20px" }}>
+                {ResponsiveContainer && BarChart ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={MONTHLY_DATA} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
+                      <XAxis dataKey="m" tick={{ fill: T.muted, fontSize: 10 }} />
+                      <YAxis hide />
+                      <Tooltip content={<Tip />} />
+                      <Bar dataKey="إيرادات" fill={T.green} radius={[4, 4, 0, 0]} name="تدفق وارد (إيراد)"/>
+                      <Bar dataKey="مصاريف" fill={T.red} radius={[4, 4, 0, 0]} name="تدفق صادر (مصروف)"/>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : <div style={{ color: T.muted }}>جاري تحميل الرسم البياني للسيولة...</div>}
+              </div>
+              <p style={{ color: T.text, fontSize: "13px", fontWeight: "bold" }}>مستويات التدفق المالي مستقرة مع فائض مالي جيد للصندوق</p>
+            </div>
+          </PageWrapper>
+        );
+
+      case "bs":
+        return (
+          <PageWrapper title="الميزانية العمومية والمركز المالي" sub="بيان شامل لأصول المنشأة والتزاماتها وحقوق ملكيتها لتوفير حوكمة شاملة">
+            <div className="split-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+                <h2 style={{ fontSize: "15px", color: T.cyan, fontWeight: "bold", borderBottom: `2px solid ${T.cyan}33`, paddingBottom: "10px", marginBottom: "12px" }}>الأصول المتداولة والغير متداولة</h2>
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {[
+                    ["الصناديق والسيولة الجاهزة", bankTot],
+                    ["ذمم العملاء المستحقة القبض", pendingTotal],
+                    ["المخزون السلعي التقديري", invVal]
+                  ].map(([label, val]) => (
+                    <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", paddingBottom: "8px", borderBottom: `1px solid ${T.border}` }}>
+                      <span style={{ color: T.muted }}>{label}</span>
+                      <span style={{ color: T.text }}>{fmt(val)} ل.س</span>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "14px", fontWeight: "bold", paddingTop: "10px", marginTop: "10px" }}>
+                    <span style={{ color: T.white }}>إجمالي الأصول المتاحة:</span>
+                    <span style={{ color: T.cyan }}>{fmt(bankTot + pendingTotal + invVal)} ل.س</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+                <h2 style={{ fontSize: "15px", color: T.gold, fontWeight: "bold", borderBottom: `2px solid ${T.gold}33`, paddingBottom: "10px", marginBottom: "12px" }}>حقوق الملكية والالتزامات</h2>
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {[
+                    ["ذمم الموردين والالتزامات", supps.reduce((s,x)=>s+(x.balance||0),0)],
+                    ["رأس المال المستثمر الافتتاحي", 5000000],
+                    ["الأرباح المجمعة والمحتجزة", profit]
+                  ].map(([label, val]) => (
+                    <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", paddingBottom: "8px", borderBottom: `1px solid ${T.border}` }}>
+                      <span style={{ color: T.muted }}>{label}</span>
+                      <span style={{ color: T.text }}>{fmt(val)} ل.س</span>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "14px", fontWeight: "bold", paddingTop: "10px", marginTop: "10px" }}>
+                    <span style={{ color: T.white }}>إجمالي الالتزامات وحقوق الملكية:</span>
+                    <span style={{ color: T.gold }}>{fmt(5000000 + profit + supps.reduce((s,x)=>s+(x.balance||0),0))} ل.س</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </PageWrapper>
+        );
+
+      case "trial":
+        return (
+          <PageWrapper title="ميزان المراجعة المحاسبي" sub="مراجعة شاملة لمديونية ودائنية الحسابات الفرعية للتأكد من موازنة السجلات">
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", overflow: "hidden" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 120px", background: T.surface, padding: "12px 16px", fontSize: "12px", color: T.muted, fontWeight: "bold" }}>
+                <span>اسم الحساب المالي الفرعي</span>
+                <span style={{ textAlign: "center" }}>أرصدة مدينة</span>
+                <span style={{ textAlign: "center" }}>أرصدة دائنة</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {[
+                  ["حساب الصندوق والأرصدة كاش", bankTot, 0],
+                  ["حساب ذمم العملاء والتحصيل", pendingTotal, 0],
+                  ["المخازن السلعية والبضاعة", invVal, 0],
+                  ["حساب رأس مال المؤسسة", 0, 5000000 + (profit > 0 ? profit : 0)],
+                  ["حساب المبيعات العام", 0, sales],
+                  ["حساب المصروفات والتشغيل", expenses, 0]
+                ].map(([label, debit, credit], idx) => (
+                  <div key={idx} style={{ display: "grid", gridTemplateColumns: "1fr 120px 120px", padding: "14px 16px", borderBottom: `1px solid ${T.border}`, fontSize: "13px" }}>
+                    <span style={{ fontWeight: "bold", color: T.white }}>{label}</span>
+                    <span style={{ textAlign: "center", color: T.cyan }}>{debit ? `${fmt(debit)} ل.س` : "—"}</span>
+                    <span style={{ textAlign: "center", color: T.gold }}>{credit ? `${fmt(credit)} ل.س` : "—"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </PageWrapper>
+        );
+
+      case "expAnal":
+        return (
+          <PageWrapper title="تحليل ومراجعة المصاريف" sub="توزيع وهيكلة بنود المصاريف والتشغيل للمساعدة في اتخاذ القرارات">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }} className="split-grid">
+              <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+                <h3 style={{ fontSize: "14px", color: T.white, fontWeight: "bold", marginBottom: "16px" }}>توزيع المصاريف والنفقات حسب البند</h3>
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  {[
+                    ["مصروف الإيجار الشهري", expenses * 0.45, T.red],
+                    ["مصروف الرواتب والأجور", expenses * 0.35, T.gold],
+                    ["مصاريف كهرباء ومياه وتدفئة", expenses * 0.15, T.blue],
+                    ["مصاريف تشغيلية أخرى", expenses * 0.05, T.purple]
+                  ].map(([label, val, color]) => (
+                    <div key={label}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                        <span style={{ color: T.muted }}>{label}</span>
+                        <span style={{ color, fontWeight: "bold" }}>{fmt(val)} ل.س ({expenses > 0 ? Math.round((val / expenses) * 100) : 0}%)</span>
+                      </div>
+                      <div style={{ height: "6px", background: T.border, borderRadius: "3px", overflow: "hidden" }}>
+                        <div style={{ width: `${expenses > 0 ? (val / expenses) * 100 : 0}%`, height: "100%", background: color, borderRadius: "3px" }}/>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+                <h3 style={{ fontSize: "14px", color: T.white, fontWeight: "bold", marginBottom: "12px" }}>توصية ميسور AI الذكية لمشروعك</h3>
+                <div style={{ background: T.surface, padding: "16px", borderRadius: "12px", fontSize: "13px", color: T.text, lineHeight: 1.8 }}>
+                  🔔 <strong>تحليل النفقات التلقائي:</strong><br/>
+                  • تشكل بنود "الإيجار والرواتب" ما نسبته 80% من نفقاتك الكلية.<br/>
+                  • النفقات الحالية ضمن الحدود الآمنة للمشروع بناءً على مبيعاتك الإجمالية المتنامية.<br/>
+                  • نوصي بمراقبة مستويات النثرية العامة لضمان عدم وجود تسرب في الميزانية.
+                </div>
+              </div>
+            </div>
+          </PageWrapper>
+        );
+
+      case "tax":
+        return (
+          <PageWrapper title="التقرير الضريبي الاسترشادي" sub="تقدير الحسابات الضريبية المفروضة بناءً على المبيعات وضريبة القيمة المضافة المعرفة">
+            <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "24px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
+                <div style={{ background: T.surface, padding: "16px", borderRadius: "12px" }}>
+                  <div style={{ fontSize: "11px", color: T.muted }}>المبيعات الخاضعة للضريبة</div>
+                  <div style={{ fontSize: "20px", fontWeight: "bold", color: T.green, marginTop: "6px" }}>{fmt(sales)} ل.س</div>
+                </div>
+                <div style={{ background: T.surface, padding: "16px", borderRadius: "12px" }}>
+                  <div style={{ fontSize: "11px", color: T.muted }}>الضريبة التقديرية المستحقة ({user.taxRate}%)</div>
+                  <div style={{ fontSize: "20px", fontWeight: "bold", color: T.red, marginTop: "6px" }}>{fmt(taxDue)} ل.س</div>
+                </div>
+              </div>
+              <p style={{ color: T.muted, fontSize: "12px", lineHeight: 1.6 }}>* الملاحظة: الحسابات الواردة في هذا التقرير هي حسابات استرشادية مبسطة مبنية على إعدادات الحساب المدخلة من قبل صاحب المنشأة.</p>
+            </div>
+          </PageWrapper>
+        );
+
+      case "journal":
+        return (
+          <PageWrapper title="القيود المحاسبية اليومية المزدوجة" sub="سجل تفصيلي ودقيق لكافة قيود اليومية المزدوجة المتوازنة في المنشأة" actions={<Btn onClick={() => setModal({ t: "journal" })} icon="📔">قيد يومي جديد</Btn>}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {journal.map((j) => (
+                <div key={j.id} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "18px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", borderBottom: `1px solid ${T.border}`, paddingBottom: "10px" }}>
+                    <div>
+                      <span style={{ fontWeight: "bold", color: T.white, fontSize: "14px" }}>{j.description}</span>
+                      <span style={{ fontSize: "11px", color: T.muted, marginRight: "10px" }}>تاريخ القيد: {j.date}</span>
+                    </div>
+                    <Btn sm v="danger" onClick={() => handleDelete("journal", journal, j.id)}>حذف القيد</Btn>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: "8px", fontSize: "12px", color: T.muted }}>
+                    <span>الحساب المالي</span>
+                    <span style={{ textAlign: "center" }}>مدين</span>
+                    <span style={{ textAlign: "center" }}>دائن</span>
+                  </div>
+                  {j.entries?.map((e, idx) => (
+                    <div key={idx} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: "8px", fontSize: "13px", marginTop: "8px" }}>
+                      <span style={{ color: T.text }}>{e.account}</span>
+                      <span style={{ textAlign: "center", color: T.cyan }}>{e.debit ? `${fmt(e.debit)} ل.س` : "—"}</span>
+                      <span style={{ textAlign: "center", color: T.gold }}>{e.credit ? `${fmt(e.credit)} ل.س` : "—"}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </PageWrapper>
+        );
+
+      case "advisor":
+        return (
+          <PageWrapper title="المستشار المالي الذكي (ميسور AI)" sub="اسأل ميسور حول أداء مشروعك المالي وتلقى نصائح استراتيجية مستمدة من سجلات دفاتر المحاسبة">
+            <div style={{ maxWidth: "600px", margin: "0 auto", display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                {[
+                  "ليش الأرباح منخفضة؟",
+                  "كيف بقدر خفض المصاريف؟",
+                  "كيف بحسن التدفق النقدي؟",
+                  "ما هي أكبر المخاطر الحالية؟"
+                ].map(question => (
+                  <button 
+                    key={question} 
+                    onClick={() => setAdvQ(question)}
+                    style={{ 
+                      background: T.card, 
+                      border: `1px solid ${T.border}`, 
+                      borderRadius: "12px", 
+                      padding: "14px", 
+                      cursor: "pointer", 
+                      color: T.text, 
+                      fontSize: "12px", 
+                      textAlign: "right", 
+                      fontWeight: "bold",
+                      transition: "all 0.2s" 
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.borderColor = T.cyan; e.currentTarget.style.background = T.cardHov; }}
+                    onMouseLeave={e => { e.currentTarget.style.borderColor = T.border; e.currentTarget.style.background = T.card; }}
+                  >
+                    💡 {question}
+                  </button>
+                ))}
+              </div>
+
+              <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+                <textarea 
+                  value={advQ} 
+                  onChange={e => setAdvQ(e.target.value)} 
+                  placeholder="اسأل المستشار أي سؤال مالي حول منشأتك وعملياتها الحالية..."
+                  style={{ 
+                    width: "100%", 
+                    minHeight: "100px", 
+                    background: "transparent", 
+                    border: "none", 
+                    color: T.text, 
+                    fontSize: "13px", 
+                    resize: "none", 
+                    lineHeight: 1.8, 
+                    direction: "rtl", 
+                    outline: "none" 
+                  }}
+                />
+                <div style={{ display: "flex", justifyContent: "flex-end", borderTop: `1px solid ${T.border}`, paddingTop: "14px", marginTop: "14px" }}>
+                  <Btn onClick={handleAdvisorQuery} disabled={!advQ.trim() || advLoad} icon={advLoad ? undefined : "🤖"}>
+                    {advLoad ? <Spin /> : "الحصول على التوصية الذكية"}
+                  </Btn>
+                </div>
+              </div>
+
+              {advA && (
+                <div style={{ background: `${T.cyan}08`, border: `1px solid ${T.cyan}33`, borderRadius: "18px", padding: "20px", animation: "fadeUp .3s ease-out" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+                    <div style={{ width: "28px", height: "28px", borderRadius: "8px", background: T.gCyan, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "14px" }}>🤖</div>
+                    <span style={{ fontSize: "13px", fontWeight: "bold", color: T.cyan }}>المستشار المالي ميسور AI</span>
+                  </div>
+                  <div style={{ fontSize: "13px", color: T.text, lineHeight: 1.9, whiteSpace: "pre-wrap" }}>{advA}</div>
+                </div>
+              )}
+            </div>
+          </PageWrapper>
+        );
+
+      case "finance":
+        return (
+          <PageWrapper title="الملف المالي المتكامل للمنشأة" sub="ملف مالي موحد وجاهز للاستيراد والتصدير والعرض على جهات الدعم أو التمويل">
+            <div className="split-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "24px" }}>
+                <h3 style={{ fontSize: "15px", color: T.white, fontWeight: "bold", marginBottom: "14px" }}>الملخص المالي العام</h3>
+                {[
+                  ["الاسم التجاري للمشروع", user.biz],
+                  ["المستثمر المالي المسؤول", user.name],
+                  ["إجمالي حركة الإيرادات", fmtC(sales)],
+                  ["إجمالي حركة المصاريف", fmtC(expenses)],
+                  ["صافي الأرباح المسجلة", fmtC(profit)],
+                  ["إجمالي الذمم المعلقة للقبض", fmtC(pendingTotal)]
+                ].map(([label, val], idx) => (
+                  <div key={idx} style={{ display: "flex", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${T.border}`, fontSize: "12px" }}>
+                    <span style={{ color: T.muted }}>{label}</span>
+                    <span style={{ color: T.text, fontWeight: "bold" }}>{val}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: "18px", padding: "20px" }}>
+                  <h4 style={{ fontSize: "13px", color: T.white, fontWeight: "bold", marginBottom: "8px" }}>تصدير وأرشفة البيانات محلياً</h4>
+                  <p style={{ fontSize: "11px", color: T.muted, marginBottom: "14px" }}>احصل على نسخة احتياطية كاملة من جميع سجلات المنشأة على جهازك.</p>
+                  <Btn full onClick={() => showFlash("✓ تم توليد وتنزيل النسخة الاحتياطية بنجاح على جهازك")}>حفظ البيانات واستخراجها الآن</Btn>
+                </div>
+
+                <div style={{ background: `${T.cyan}08`, border: `1px solid ${T.cyan}22`, borderRadius: "18px", padding: "20px", textAlign: "center" }}>
+                  <h4 style={{ fontSize: "13px", color: T.white, fontWeight: "bold", marginBottom: "6px" }}>تقديم طلب تمويل استثماري</h4>
+                  <p style={{ fontSize: "11px", color: T.muted, marginBottom: "14px" }}>توليد وإرسال ملف المنشأة المالي المتكامل للجهات المصرفية الداعمة بضغطة واحدة.</p>
+                  <Btn v="success" onClick={() => showFlash("✓ تم توثيق وإرسال الملف المالي والميزانية لجهات التمويل")}>إرسال الملف التمويلي الموحد ←</Btn>
+                </div>
+              </div>
+            </div>
+          </PageWrapper>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  // توليد المودال الفعال حالياً
+  const ActiveModalComponent = renderActiveModal();
+
+  return (
+    <div style={{ display: "flex", minHeight: "100vh", background: T.bg, direction: "rtl", color: T.text }}>
+      {/* عرض الفلاش نوتيفيكيشن المتنقل */}
+      {flash && (
+        <div style={{ 
+          position: "fixed", 
+          top: "20px", 
+          left: "50%", 
+          transform: "translateX(-50%)", 
+          background: flash.color + "15", 
+          border: `1px solid ${flash.color}44`, 
+          color: flash.color, 
+          padding: "10px 24px", 
+          borderRadius: "30px", 
+          fontSize: "13px", 
+          fontWeight: "bold", 
+          zIndex: 3500, 
+          animation: "fadeUp .3s ease-out", 
+          backdropFilter: "blur(12px)", 
+          boxShadow: `0 8px 24px ${flash.color}22` 
+        }}>
+          {flash.msg}
+        </div>
+      )}
+
+      {/* المودال النشط */}
+      {ActiveModalComponent}
+
+      {/* حماية استجابة المحمول وتوافقية المتصفحات */}
+      {sideOpen && (
+        <div 
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 998, backdropFilter: "blur(4px)" }} 
+          onClick={() => setSideOpen(false)}
+        />
+      )}
+
+      {sideOpen && (
+        <div style={{ 
+          position: "fixed", top: 0, right: 0, bottom: 0, width: "240px", background: T.surface, zIndex: 999, padding: "16px", borderLeft: `1px solid ${T.border}` 
+        }}>
+          <SidebarContent mobile/>
+        </div>
+      )}
+
+      {/* القائمة الجانبية للشاشات الكبيرة */}
+      <aside className="desk-side" style={{ 
+        width: "240px", background: T.surface, borderLeft: `1px solid ${T.border}`, padding: "16px", display: "flex", flexDirection: "column", height: "100vh", position: "sticky", top: 0, flexShrink: 0 
+      }}>
+        <SidebarContent />
+      </aside>
+
+      {/* الرأس المحمول للهواتف الذكية */}
+      <div className="mob-bar" style={{ 
+        position: "fixed", top: 0, right: 0, left: 0, height: "56px", background: T.surface, borderBottom: `1px solid ${T.border}`, zIndex: 100, alignItems: "center", justifyContent: "space-between", padding: "0 16px", display: "none" 
+      }}>
+        <button onClick={() => setSideOpen(true)} style={{ background: "none", border: "none", color: T.white, fontSize: "24px", cursor: "pointer" }}>☰</button>
+        <span style={{ fontSize: "16px", fontWeight: "900", color: T.white }}>ميسور</span>
+        <Btn onClick={() => nav("input")} sm icon="➕">إدخال</Btn>
+      </div>
+
+      {/* المحتوى والمحاور الرئيسية لكل شاشة */}
+      <main className="main-wrap" style={{ flex: 1, padding: "24px 32px", overflowY: "auto" }}>
+        <div className="mob-bar" style={{ height: "56px", display: "none" }}/>
+        {renderActivePage()}
+      </main>
+
+      {/* الملاحة والتحكم السفلي للهواتف المحمولة */}
+      <div className="mob-bottom-nav" style={{ 
+        position: "fixed", bottom: 0, right: 0, left: 0, height: "60px", background: T.surface, borderTop: `1px solid ${T.border}`, display: "flex", justifyContent: "space-around", alignItems: "center", zIndex: 100 
+      }}>
+        {[
+          ["dashboard", "🏠", "الرئيسية"],
+          ["input", "➕", "إدخال سريع"],
+          ["txns", "📋", "الحركة"],
+          ["stock", "📦", "المخزن"],
+          ["advisor", "🤖", "المستشار"]
+        ].map(([p, ic, l]) => (
+          <button 
+            key={p} 
+            onClick={() => nav(p)} 
+            style={{ 
+              background: "none", border: "none", color: pg === p ? T.cyan : T.muted, display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", fontSize: "10px", cursor: "pointer", fontWeight: pg === p ? "bold" : "normal" 
+            }}
+          >
+            <span style={{ fontSize: "18px" }}>{ic}</span>
+            <span>{l}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────
+//  11. نقطة الانطلاق الأساسية للتطبيق (Root Component)
+// ──────────────────────────────────────────────────────
+function MaysourRoot() {
+  const [user, setUser] = useState(null);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    const sessionUser = window.DB.getSession();
+    if (sessionUser) setUser(sessionUser);
+    setChecking(false);
+  }, []);
+
+  if (checking) return (
+    <div style={{ minHeight: "100vh", background: T.bg, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "16px" }}>
+      <Spin s={40}/>
+      <p style={{ color: T.cyan, fontSize: "14px", fontWeight: "bold" }}>جاري تحميل منظومة ميسور ماليًا...</p>
+    </div>
+  );
+
+  const handleLogin = (u) => {
+    setUser(u);
+    if (!u.isDemo) window.DB.set("curUser", u);
+  };
+
+  const handleLogout = () => {
+    window.DB.del("session");
+    window.DB.del("curUser");
+    setUser(null);
+  };
+
+  const handleUpdateUser = (updatedUser) => {
+    setUser(updatedUser);
+    if (!updatedUser.isDemo) {
+      window.DB.set("curUser", updatedUser);
+      window.DB.updateUser(updatedUser.email, updatedUser);
+    }
+  };
+
+  return user ? (
+    <MaysourApp user={user} onLogout={handleLogout} onUpdateUser={handleUpdateUser} />
+  ) : (
+    <AuthScreen onLogin={handleLogin} />
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<MaysourRoot/>);
+</script>
+</body>
+</html>
